@@ -9,7 +9,7 @@ import { db } from "@/integrations/firebase/client";
 // Falls back to the server LOVABLE_API_KEY env var if no user key is stored.
 export const generateFrameImage = createServerFn({ method: "POST" })
   .middleware([requireFirebaseAuth])
-  .inputValidator(
+  .validator(
     (input: { frameId: string; heading: string; description: string; style: string }) => input,
   )
   .handler(async ({ data, context }) => {
