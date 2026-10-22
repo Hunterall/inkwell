@@ -48,6 +48,7 @@ type ExtractedItem = {
   id: string;
   name: string;
   description: string;
+  cast?: string;
   selected: boolean;
 };
 
@@ -197,6 +198,7 @@ export function BibleTab({ story, update }: { story: Story; update: (p: Partial<
           kind: "character",
           name: c.name.trim(),
           description: c.description.trim(),
+          cast: c.cast?.trim() || "",
           createdAt: serverTimestamp(),
         });
       }
@@ -327,6 +329,19 @@ export function BibleTab({ story, update }: { story: Story; update: (p: Partial<
                     onChange={(ev) => patch(e.id, { name: ev.target.value })}
                     className="mb-2 font-display text-lg"
                   />
+                  {k === "character" && (
+                    <div className="mb-2 space-y-1">
+                      <label className="text-[11px] font-mono uppercase tracking-wider text-sepia flex items-center gap-1">
+                        <Users className="h-3 w-3" /> Cast / Actor Name
+                      </label>
+                      <Input
+                        value={e.cast || ""}
+                        placeholder="e.g. Cillian Murphy, Florence Pugh"
+                        onChange={(ev) => patch(e.id, { cast: ev.target.value })}
+                        className="h-8 text-xs font-sans bg-background/60"
+                      />
+                    </div>
+                  )}
                   <Textarea
                     value={e.description}
                     placeholder="Description, traits, role, history…"
@@ -415,6 +430,18 @@ export function BibleTab({ story, update }: { story: Story; update: (p: Partial<
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
+                  </div>
+                  <div className="mb-2">
+                    <Input
+                      value={c.cast || ""}
+                      onChange={(e) => {
+                        const updated = [...extractedCharacters];
+                        updated[idx]!.cast = e.target.value;
+                        setExtractedCharacters(updated);
+                      }}
+                      placeholder="Cast / Actor name (e.g. Timothée Chalamet)"
+                      className="text-xs h-7 bg-background/60"
+                    />
                   </div>
                   <Textarea
                     value={c.description}

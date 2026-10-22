@@ -9,13 +9,23 @@ import {
 import { db } from "@/integrations/firebase/client";
 
 export type Chapter = { id: string; title: string; content: string; position: number };
-export type BibleEntry = { id: string; kind: string; name: string; description: string };
+export type BibleEntry = {
+  id: string;
+  kind: string;
+  name: string;
+  description: string;
+  cast?: string;
+};
 export type Frame = {
   id: string;
   position: number;
   heading: string;
   description: string;
   image_url: string | null;
+  lighting?: "day" | "night" | "cloudy" | "rainy" | "golden_hour" | "interior" | string;
+  location?: string;
+  props?: string;
+  cast?: string;
 };
 
 export function useChapters(storyId: string) {
@@ -68,7 +78,10 @@ export function useFrames(storyId: string) {
 export function bibleToText(entries: BibleEntry[]) {
   return entries
     .filter((e) => e.name.trim())
-    .map((e) => `[${e.kind}] ${e.name}: ${e.description}`)
+    .map((e) => {
+      const castInfo = e.cast?.trim() ? ` (Cast/Actor: ${e.cast.trim()})` : "";
+      return `[${e.kind}] ${e.name}${castInfo}: ${e.description}`;
+    })
     .join("\n");
 }
 

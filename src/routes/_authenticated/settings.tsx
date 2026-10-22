@@ -12,6 +12,7 @@ import {
   EyeOff,
   Save,
   HelpCircle,
+  ImageIcon,
 } from "lucide-react";
 import { auth } from "@/integrations/firebase/client";
 import { Button } from "@/components/ui/button";
@@ -23,14 +24,25 @@ import {
   loadAiSettings,
   verifyOpenRouterKey,
   POPULAR_MODELS,
+  POPULAR_GEMINI_IMAGE_MODELS,
+  POPULAR_POLLINATIONS_MODELS,
+  POPULAR_CLOUDFLARE_MODELS,
   type AiSettings,
 } from "@/lib/settings";
+
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({
     meta: [
       { title: "Settings — Inkwell" },
-      { name: "description", content: "Configure your AI provider and OpenRouter API key." },
+      { name: "description", content: "Configure your AI text and image generation providers and API keys." },
     ],
   }),
   component: SettingsPage,
@@ -54,6 +66,12 @@ function SettingsPage() {
     limit?: number | null | undefined;
     error?: string | undefined;
   } | null>(null);
+
+  // Image generation state
+  const [showImageKeys, setShowImageKeys] = useState(false);
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const [showPollinationsKey, setShowPollinationsKey] = useState(false);
+  const [showCloudflareToken, setShowCloudflareToken] = useState(false);
 
   useEffect(() => {
     if (!uid) return;
@@ -111,6 +129,14 @@ function SettingsPage() {
         {
           openRouterApiKey: settings.openRouterApiKey.trim(),
           openRouterModel: selectedModel,
+          imageGeminiApiKey: settings.imageGeminiApiKey.trim(),
+          imageGeminiModel: settings.imageGeminiModel.trim(),
+          imagePollinationsApiKey: settings.imagePollinationsApiKey.trim(),
+          imagePollinationsModel: settings.imagePollinationsModel.trim(),
+          imageCloudflareAccountId: settings.imageCloudflareAccountId.trim(),
+          imageCloudflareApiToken: settings.imageCloudflareApiToken.trim(),
+          imageCloudflareModel: settings.imageCloudflareModel.trim(),
+          imageProvider: settings.imageProvider,
         },
         uid,
       );
@@ -316,6 +342,293 @@ function SettingsPage() {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Image Generation Settings Card */}
+          <div className="page rounded-lg p-6 space-y-5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-md bg-sepia/15 text-sepia">
+                  <ImageIcon className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-semibold">Image Generation Providers</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Configure API keys for storyboard illustration. Multiple providers supported.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="text-sm text-sepia hover:underline"
+                onClick={() => setShowImageKeys(!showImageKeys)}
+              >
+                {showImageKeys ? "Hide" : "Show"} image keys
+              </button>
+            </div>
+
+            {showImageKeys && (
+              <div className="space-y-4">
+                {/* Provider selector */}
+                <div className="space-y-2">
+                  <Label htmlFor="imageProvider">Default Image Provider</Label>
+                  <Select value={settings.imageProvider} onValueChange={(v) => setSettings({ ...settings, imageProvider: v as any })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="gemini">Google Gemini / Imagen 3 (API Key)</SelectItem>
+                      <SelectItem value="pollinations">Pollinations AI URL Generator (Fast, No-key or Keyed)</SelectItem>
+                      <SelectItem value="cloudflare">Cloudflare Workers AI (Account ID + Token)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Gemini / Imagen 3 */}
+                <div className="border rounded-md p-4 space-y-3 bg-background/50">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="font-semibold">Google Gemini / Imagen</span>
+                      <p className="text-xs text-muted-foreground">
+                        Generate high-resolution illustrations using Google's Imagen 3 or Gemini multimodal image models.
+                      </p>
+                    </div>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                      settings.imageProvider === "gemini" ? "bg-primary text-primary-foreground" : "bg-muted"
+                    }`}>
+                      {settings.imageProvider === "gemini" ? "Active" : "Inactive"}
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="imageGeminiKey">Gemini API Key</Label>
+                    <div className="relative flex items-center">
+                      <Input
+                        id="imageGeminiKey"
+                        type={showGeminiKey ? "text" : "password"}
+                        placeholder="AIzaSy..."
+                        className="pr-24 font-mono text-sm"
+                        value={settings.imageGeminiApiKey}
+                        onChange={(e) => setSettings({ ...settings, imageGeminiApiKey: e.target.value })}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowGeminiKey(!showGeminiKey)}
+                        className="absolute right-3 text-muted-foreground hover:text-foreground"
+                        aria-label={showGeminiKey ? "Hide key" : "Show key"}
+                      >
+                        {showGeminiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Get key at <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="underline">aistudio.google.com</a>
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="imageGeminiModel">Model</Label>
+                    <div className="space-y-2">
+                      <Select
+                        value={
+                          POPULAR_GEMINI_IMAGE_MODELS.some((m) => m.id === settings.imageGeminiModel)
+                            ? settings.imageGeminiModel
+                            : "custom"
+                        }
+                        onValueChange={(val) => {
+                          if (val !== "custom") {
+                            setSettings({ ...settings, imageGeminiModel: val });
+                          }
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a Gemini model" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {POPULAR_GEMINI_IMAGE_MODELS.map((m) => (
+                            <SelectItem key={m.id} value={m.id}>
+                              {m.name} ({m.id})
+                            </SelectItem>
+                          ))}
+                          <SelectItem value="custom">Custom model ID…</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        id="imageGeminiModel"
+                        placeholder="e.g. imagen-3.0-generate-002 or gemini-2.5-flash-image"
+                        className="font-mono text-sm"
+                        value={settings.imageGeminiModel}
+                        onChange={(e) => setSettings({ ...settings, imageGeminiModel: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Pollinations AI URL Generator */}
+                <div className="border rounded-md p-4 space-y-3 bg-background/50">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="font-semibold">Pollinations AI URL Generator</span>
+                      <p className="text-xs text-muted-foreground">
+                        Instant URL-based image generation. Free tier available with no mandatory API key, or enter your secret/publishable key for priority.
+                      </p>
+                    </div>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                      settings.imageProvider === "pollinations" ? "bg-primary text-primary-foreground" : "bg-muted"
+                    }`}>
+                      {settings.imageProvider === "pollinations" ? "Active" : "Inactive"}
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="imagePollinationsKey">API Key (Optional)</Label>
+                    <div className="relative flex items-center">
+                      <Input
+                        id="imagePollinationsKey"
+                        type={showPollinationsKey ? "text" : "password"}
+                        placeholder="sk_... (optional for free tier)"
+                        className="pr-24 font-mono text-sm"
+                        value={settings.imagePollinationsApiKey}
+                        onChange={(e) => setSettings({ ...settings, imagePollinationsApiKey: e.target.value })}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPollinationsKey(!showPollinationsKey)}
+                        className="absolute right-3 text-muted-foreground hover:text-foreground"
+                        aria-label={showPollinationsKey ? "Hide key" : "Show key"}
+                      >
+                        {showPollinationsKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Works without a key, or get a priority key at <a href="https://enter.pollinations.ai" target="_blank" rel="noreferrer" className="underline">enter.pollinations.ai</a>
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="imagePollinationsModel">Model / Style</Label>
+                    <div className="space-y-2">
+                      <Select
+                        value={
+                          POPULAR_POLLINATIONS_MODELS.some((m) => m.id === settings.imagePollinationsModel)
+                            ? settings.imagePollinationsModel
+                            : "custom"
+                        }
+                        onValueChange={(val) => {
+                          if (val !== "custom") {
+                            setSettings({ ...settings, imagePollinationsModel: val });
+                          }
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select Pollinations model" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {POPULAR_POLLINATIONS_MODELS.map((m) => (
+                            <SelectItem key={m.id} value={m.id}>
+                              {m.name}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value="custom">Custom model name…</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        id="imagePollinationsModel"
+                        placeholder="e.g. flux, flux-realism, turbo"
+                        className="font-mono text-sm"
+                        value={settings.imagePollinationsModel}
+                        onChange={(e) => setSettings({ ...settings, imagePollinationsModel: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Cloudflare Workers AI */}
+                <div className="border rounded-md p-4 space-y-3 bg-background/50">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="font-semibold">Cloudflare Workers AI Image Generator</span>
+                      <p className="text-xs text-muted-foreground">
+                        Run FLUX.1 Schnell or SDXL on Cloudflare's serverless GPU edge network.
+                      </p>
+                    </div>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                      settings.imageProvider === "cloudflare" ? "bg-primary text-primary-foreground" : "bg-muted"
+                    }`}>
+                      {settings.imageProvider === "cloudflare" ? "Active" : "Inactive"}
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="imageCloudflareAccountId">Cloudflare Account ID</Label>
+                    <Input
+                      id="imageCloudflareAccountId"
+                      placeholder="e.g. 1a2b3c4d5e6f..."
+                      className="font-mono text-sm"
+                      value={settings.imageCloudflareAccountId}
+                      onChange={(e) => setSettings({ ...settings, imageCloudflareAccountId: e.target.value })}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Find in Cloudflare Dashboard under Workers & Pages or Overview.
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="imageCloudflareToken">Cloudflare API Token</Label>
+                    <div className="relative flex items-center">
+                      <Input
+                        id="imageCloudflareToken"
+                        type={showCloudflareToken ? "text" : "password"}
+                        placeholder="API Token with Workers AI Read/Write permission"
+                        className="pr-24 font-mono text-sm"
+                        value={settings.imageCloudflareApiToken}
+                        onChange={(e) => setSettings({ ...settings, imageCloudflareApiToken: e.target.value })}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowCloudflareToken(!showCloudflareToken)}
+                        className="absolute right-3 text-muted-foreground hover:text-foreground"
+                        aria-label={showCloudflareToken ? "Hide token" : "Show token"}
+                      >
+                        {showCloudflareToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Create token at <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noreferrer" className="underline">dash.cloudflare.com/profile/api-tokens</a> with Workers AI permission.
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="imageCloudflareModel">Model Name</Label>
+                    <div className="space-y-2">
+                      <Select
+                        value={
+                          POPULAR_CLOUDFLARE_MODELS.some((m) => m.id === settings.imageCloudflareModel)
+                            ? settings.imageCloudflareModel
+                            : "custom"
+                        }
+                        onValueChange={(val) => {
+                          if (val !== "custom") {
+                            setSettings({ ...settings, imageCloudflareModel: val });
+                          }
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select Cloudflare model" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {POPULAR_CLOUDFLARE_MODELS.map((m) => (
+                            <SelectItem key={m.id} value={m.id}>
+                              {m.name}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value="custom">Custom model name…</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        id="imageCloudflareModel"
+                        placeholder="e.g. @cf/black-forest-labs/flux-1-schnell"
+                        className="font-mono text-sm"
+                        value={settings.imageCloudflareModel}
+                        onChange={(e) => setSettings({ ...settings, imageCloudflareModel: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* How it works info card */}

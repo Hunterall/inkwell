@@ -63,14 +63,14 @@ export function buildPrompt(r: AiRequest): { instructions: string; input: string
     case "script":
       return {
         instructions:
-          "You are a professional screenwriter. Convert prose to a screenplay in standard plain-text format: scene headings like 'INT. KITCHEN - NIGHT' in caps, action lines, CHARACTER NAMES in caps on their own line before dialogue, parentheticals in (brackets), transitions like 'CUT TO:' right-aligned is not needed. Output only screenplay text, no markdown." +
+          "You are a professional screenwriter. Convert prose to a screenplay in standard plain-text format: scene headings like 'INT. KITCHEN - NIGHT' in caps, action lines, CHARACTER NAMES in caps on their own line before dialogue, parentheticals in (brackets), transitions like 'CUT TO:' right-aligned is not needed. Output only screenplay text, no markdown. Crucial requirement: Adapt the ENTIRE provided story/chapter completely from beginning to climax and ending without cutting off prematurely or omitting scenes." +
           bible,
-        input: `Adapt this story into a screenplay. Start with FADE IN:\n\n${r.text.slice(0, 40000)}`,
+        input: `Adapt the complete story/chapter below into a screenplay. Ensure all key scenes and dialogue are adapted through to the end:\n\n${r.text.slice(0, 100000)}`,
       };
     case "scenes":
       return {
         instructions:
-          "You break stories into visual scenes for a storyboard. Output one scene per line in exactly this form: HEADING || one-sentence visual description of the key frame. No numbering, no other text. Between 4 and 10 lines." +
+          "You break stories into visual storyboard frames for production and pitch decks. Output one scene per line in exactly this form: HEADING || visual description of key frame || LIGHTING (day, night, cloudy, rainy, golden_hour, or interior) || LOCATION || PROPS (comma separated key props) || CAST (comma separated characters present). No numbering or extra text. Between 5 and 12 lines." +
           bible,
         input: r.text.slice(0, 40000),
       };
@@ -109,10 +109,47 @@ export function parseScenes(text: string) {
     .map((l) => l.trim())
     .filter((l) => l.includes("||"))
     .map((l) => {
-      const [heading, ...rest] = l.split("||");
+      const parts = l.split("||").map((p) => p.trim());
+      const heading = (parts[0] ?? "").replace(/^[-*\d.\s]+/, "").trim();
+      const description = parts[1] ?? "";
+      let lighting = parts[2] ? parts[2].toLowerCase() : "";
+      let location = parts[3] ?? "";
+      const props = parts[4] ?? "";
+      const cast = parts[5] ?? "";
+
+      // Fallback heuristics if model only returned heading || description
+      const fullText = `${heading} ${description}`.toLowerCase();
+      if (!lighting) {
+        if (fullText.includes("rain") || fullText.includes("storm") || fullText.includes("downpour")) {
+          lighting = "rainy";
+        } else if (fullText.includes("cloud") || fullText.includes("overcast") || fullText.includes("fog") || fullText.includes("mist")) {
+          lighting = "cloudy";
+        } else if (fullText.includes("night") || fullText.includes("dusk") || fullText.includes("midnight") || fullText.includes("moon") || fullText.includes("dark")) {
+          lighting = "night";
+        } else if (fullText.includes("golden hour") || fullText.includes("sunset") || fullText.includes("sunrise") || fullText.includes("dawn")) {
+          lighting = "golden_hour";
+        } else {
+          lighting = "day";
+        }
+      }
+
+      if (!location) {
+        // e.g. "INT. KITCHEN - DAY" or "EXT. ROOFTOP - NIGHT"
+        const headingMatch = heading.match(/(?:INT\.|EXT\.|INT\/EXT\.)\s+([^-–—]+)/i);
+        if (headingMatch && headingMatch[1]) {
+          location = headingMatch[1].trim();
+        } else {
+          location = heading;
+        }
+      }
+
       return {
-        heading: (heading ?? "").replace(/^[-*\d.\s]+/, "").trim(),
-        description: rest.join("||").trim(),
+        heading,
+        description,
+        lighting,
+        location,
+        props,
+        cast,
       };
     })
     .filter((s) => s.heading && s.description);

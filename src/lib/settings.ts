@@ -4,7 +4,38 @@ import { db } from "@/integrations/firebase/client";
 export type AiSettings = {
   openRouterApiKey: string;
   openRouterModel: string;
+  /** Image generation settings — Gemini, Pollinations AI, Cloudflare AI */
+  imageGeminiApiKey: string;
+  imageGeminiModel: string;
+  imagePollinationsApiKey: string;
+  imagePollinationsModel: string;
+  imageCloudflareAccountId: string;
+  imageCloudflareApiToken: string;
+  imageCloudflareModel: string;
+  /** Which image provider to use */
+  imageProvider: "gemini" | "pollinations" | "cloudflare";
 };
+
+export const POPULAR_GEMINI_IMAGE_MODELS = [
+  { id: "imagen-3.0-generate-002", name: "Imagen 3 (Recommended)" },
+  { id: "gemini-2.5-flash-image", name: "Gemini 2.5 Flash Image" },
+  { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash" },
+];
+
+export const POPULAR_POLLINATIONS_MODELS = [
+  { id: "flux", name: "FLUX.1 Schnell (Default, Fast & High Quality)" },
+  { id: "flux-realism", name: "FLUX Realism" },
+  { id: "flux-anime", name: "FLUX Anime / Stylized" },
+  { id: "flux-3d", name: "FLUX 3D" },
+  { id: "turbo", name: "SDXL Turbo" },
+];
+
+export const POPULAR_CLOUDFLARE_MODELS = [
+  { id: "@cf/black-forest-labs/flux-1-schnell", name: "FLUX.1 Schnell (Recommended)" },
+  { id: "@cf/stabilityai/stable-diffusion-xl-base-1.0", name: "Stable Diffusion XL Base 1.0" },
+  { id: "@cf/bytedance/stable-diffusion-xl-lightning", name: "SDXL Lightning (Fast)" },
+  { id: "@cf/lykon/dreamshaper-8-lcm", name: "DreamShaper 8 LCM" },
+];
 
 export const POPULAR_MODELS = [
   {
@@ -60,6 +91,14 @@ export const POPULAR_MODELS = [
 export const DEFAULT_AI_SETTINGS: AiSettings = {
   openRouterApiKey: "",
   openRouterModel: "anthropic/claude-3.5-sonnet",
+  imageGeminiApiKey: "",
+  imageGeminiModel: "imagen-3.0-generate-002",
+  imagePollinationsApiKey: "",
+  imagePollinationsModel: "flux",
+  imageCloudflareAccountId: "",
+  imageCloudflareApiToken: "",
+  imageCloudflareModel: "@cf/black-forest-labs/flux-1-schnell",
+  imageProvider: "pollinations",
 };
 
 const LOCAL_STORAGE_KEY = "inkwell_ai_settings_v1";
@@ -76,6 +115,19 @@ export function getAiSettings(): AiSettings {
     return {
       openRouterApiKey: parsed.openRouterApiKey?.trim() ?? "",
       openRouterModel: parsed.openRouterModel?.trim() || DEFAULT_AI_SETTINGS.openRouterModel,
+      imageGeminiApiKey: parsed.imageGeminiApiKey?.trim() ?? "",
+      imageGeminiModel: parsed.imageGeminiModel?.trim() || DEFAULT_AI_SETTINGS.imageGeminiModel,
+      imagePollinationsApiKey: parsed.imagePollinationsApiKey?.trim() ?? "",
+      imagePollinationsModel: parsed.imagePollinationsModel?.trim() || DEFAULT_AI_SETTINGS.imagePollinationsModel,
+      imageCloudflareAccountId: parsed.imageCloudflareAccountId?.trim() ?? "",
+      imageCloudflareApiToken: parsed.imageCloudflareApiToken?.trim() ?? "",
+      imageCloudflareModel: parsed.imageCloudflareModel?.trim() || DEFAULT_AI_SETTINGS.imageCloudflareModel,
+      imageProvider:
+        parsed.imageProvider === "gemini" ||
+        parsed.imageProvider === "pollinations" ||
+        parsed.imageProvider === "cloudflare"
+          ? parsed.imageProvider
+          : DEFAULT_AI_SETTINGS.imageProvider,
     };
   } catch {
     return DEFAULT_AI_SETTINGS;
@@ -99,6 +151,35 @@ export async function saveAiSettings(
       settings.openRouterModel !== undefined
         ? settings.openRouterModel.trim()
         : current.openRouterModel,
+    imageGeminiApiKey:
+      settings.imageGeminiApiKey !== undefined
+        ? settings.imageGeminiApiKey.trim()
+        : current.imageGeminiApiKey,
+    imageGeminiModel:
+      settings.imageGeminiModel !== undefined
+        ? settings.imageGeminiModel.trim()
+        : current.imageGeminiModel,
+    imagePollinationsApiKey:
+      settings.imagePollinationsApiKey !== undefined
+        ? settings.imagePollinationsApiKey.trim()
+        : current.imagePollinationsApiKey,
+    imagePollinationsModel:
+      settings.imagePollinationsModel !== undefined
+        ? settings.imagePollinationsModel.trim()
+        : current.imagePollinationsModel,
+    imageCloudflareAccountId:
+      settings.imageCloudflareAccountId !== undefined
+        ? settings.imageCloudflareAccountId.trim()
+        : current.imageCloudflareAccountId,
+    imageCloudflareApiToken:
+      settings.imageCloudflareApiToken !== undefined
+        ? settings.imageCloudflareApiToken.trim()
+        : current.imageCloudflareApiToken,
+    imageCloudflareModel:
+      settings.imageCloudflareModel !== undefined
+        ? settings.imageCloudflareModel.trim()
+        : current.imageCloudflareModel,
+    imageProvider: settings.imageProvider ?? current.imageProvider,
   };
 
   if (typeof window !== "undefined") {
@@ -138,6 +219,25 @@ export async function loadAiSettings(userId: string): Promise<AiSettings> {
         openRouterApiKey: data.openRouterApiKey?.trim() || local.openRouterApiKey || "",
         openRouterModel:
           data.openRouterModel?.trim() || local.openRouterModel || DEFAULT_AI_SETTINGS.openRouterModel,
+        imageGeminiApiKey: data.imageGeminiApiKey?.trim() || local.imageGeminiApiKey || "",
+        imageGeminiModel:
+          data.imageGeminiModel?.trim() || local.imageGeminiModel || DEFAULT_AI_SETTINGS.imageGeminiModel,
+        imagePollinationsApiKey:
+          data.imagePollinationsApiKey?.trim() || local.imagePollinationsApiKey || "",
+        imagePollinationsModel:
+          data.imagePollinationsModel?.trim() || local.imagePollinationsModel || DEFAULT_AI_SETTINGS.imagePollinationsModel,
+        imageCloudflareAccountId:
+          data.imageCloudflareAccountId?.trim() || local.imageCloudflareAccountId || "",
+        imageCloudflareApiToken:
+          data.imageCloudflareApiToken?.trim() || local.imageCloudflareApiToken || "",
+        imageCloudflareModel:
+          data.imageCloudflareModel?.trim() || local.imageCloudflareModel || DEFAULT_AI_SETTINGS.imageCloudflareModel,
+        imageProvider:
+          data.imageProvider === "gemini" ||
+          data.imageProvider === "pollinations" ||
+          data.imageProvider === "cloudflare"
+            ? data.imageProvider
+            : local.imageProvider,
       };
       if (typeof window !== "undefined") {
         localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(merged));

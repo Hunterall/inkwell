@@ -39,7 +39,7 @@ export const Route = createFileRoute("/api/write")({
 
         if (openRouterKey) {
           const maxTokens =
-            body.mode === "bible" ? 1800 : body.mode === "script" ? 2000 : 1200;
+            body.mode === "bible" ? 2500 : body.mode === "script" ? 8192 : 1500;
 
           try {
             const openRouterRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
