@@ -154,12 +154,19 @@ export function ScriptTab({
           Download script
         </Button>
         <div>
-          <p className="mb-2 font-mono text-xs uppercase tracking-widest text-sepia">
-            Scene breakdown ({scenes.length})
-          </p>
-          <ol className="space-y-1 font-mono text-xs">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="font-mono text-xs uppercase tracking-widest text-sepia">
+              Scene breakdown ({scenes.length})
+            </p>
+          </div>
+          {scenes.length > 0 && (
+            <p className="mb-2 text-[11px] text-muted-foreground leading-relaxed">
+              💡 <em>Tip: Scout real-world filming destinations (e.g. Goa, Gokarna, Udupi for beaches; Manali for mountains) in <strong>Story Bible &rarr; Places</strong> or <strong>Storyboard</strong>.</em>
+            </p>
+          )}
+          <ol className="space-y-1 font-mono text-xs max-h-60 overflow-y-auto pr-1">
             {scenes.map((s, i) => (
-              <li key={i}>
+              <li key={i} className="line-clamp-1 hover:text-sepia transition-colors">
                 {i + 1}. {s.trim()}
               </li>
             ))}

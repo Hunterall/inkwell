@@ -16,6 +16,12 @@ import {
   Layers,
   Edit2,
   Check,
+  Compass,
+  Film,
+  Lightbulb,
+  CheckCircle2,
+  Trash2,
+  Plus,
 } from "lucide-react";
 import { jsPDF } from "jspdf";
 import {
@@ -27,10 +33,20 @@ import {
   addDoc,
   doc,
   updateDoc,
+  serverTimestamp,
 } from "firebase/firestore";
-import { db } from "@/integrations/firebase/client";
+import { db, auth } from "@/integrations/firebase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -39,7 +55,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { streamWrite } from "@/lib/ai/stream-client";
-import { parseScenes } from "@/lib/ai/prompts";
+import { parseScenes, parseSuggestedLocations, type SuggestedLocation } from "@/lib/ai/prompts";
 import { generateFrameImage } from "@/lib/frames.functions";
 import {
   bibleToText,
@@ -56,11 +72,174 @@ import type { Story } from "@/routes/_authenticated/stories_.$id";
 const LIGHTING_OPTIONS = [
   { value: "day", label: "Day", icon: Sun, color: "text-amber-500" },
   { value: "night", label: "Night", icon: Moon, color: "text-indigo-400" },
+  { value: "golden_hour", label: "Golden Hour", icon: Sun, color: "text-orange-400" },
   { value: "cloudy", label: "Cloudy", icon: Cloud, color: "text-slate-400" },
   { value: "rainy", label: "Rainy", icon: CloudRain, color: "text-blue-400" },
-  { value: "golden_hour", label: "Golden Hour", icon: Sun, color: "text-orange-400" },
   { value: "interior", label: "Interior", icon: Layers, color: "text-emerald-500" },
 ];
+
+export type LightingCategory = "day" | "night" | "golden_hour" | "cloudy" | "rainy" | "interior";
+
+export function getFrameLightingCategory(f: {
+  lighting?: string | null;
+  heading?: string | null;
+  description?: string | null;
+}): LightingCategory {
+  const l = (f.lighting || "").toLowerCase().trim();
+  const h = (f.heading || "").toLowerCase().trim();
+  const d = (f.description || "").toLowerCase().trim();
+
+  // 1. Rainy / Storm / Downpour
+  if (
+    l.includes("rain") ||
+    l.includes("storm") ||
+    h.includes("rain") ||
+    d.includes("rain") ||
+    d.includes("downpour")
+  ) {
+    return "rainy";
+  }
+
+  // 2. Cloudy / Overcast / Fog / Mist
+  if (
+    l.includes("cloud") ||
+    l.includes("overcast") ||
+    l.includes("fog") ||
+    l.includes("mist") ||
+    h.includes("cloud") ||
+    h.includes("overcast") ||
+    h.includes("fog")
+  ) {
+    return "cloudy";
+  }
+
+  // 3. Golden Hour / Sunset / Sunrise / Magic Hour / Dawn
+  if (
+    l.includes("golden") ||
+    l.includes("sunset") ||
+    l.includes("sunrise") ||
+    l.includes("magic") ||
+    l.includes("dawn") ||
+    h.includes("sunset") ||
+    h.includes("sunrise") ||
+    h.includes("golden hour") ||
+    h.includes("golden_hour") ||
+    h.includes("dawn")
+  ) {
+    return "golden_hour";
+  }
+
+  // 4. Night / Evening / Dark / Moon / Midnight / Dusk
+  if (
+    l.includes("night") ||
+    l.includes("evening") ||
+    l.includes("dark") ||
+    l.includes("moon") ||
+    l.includes("midnight") ||
+    h.includes("night") ||
+    h.includes("evening") ||
+    h.includes("midnight") ||
+    h.includes("dusk")
+  ) {
+    return "night";
+  }
+
+  // 5. Day / Morning / Afternoon / Sun / Noon
+  if (
+    l.includes("day") ||
+    l.includes("morning") ||
+    l.includes("afternoon") ||
+    l.includes("sun") ||
+    h.includes("day") ||
+    h.includes("morning") ||
+    h.includes("afternoon")
+  ) {
+    return "day";
+  }
+
+  // 6. Interior
+  if (l.includes("interior") || l.includes("indoor") || h.startsWith("int.")) {
+    return "interior";
+  }
+
+  return "day";
+}
+
+function getQuickScenePlaces(heading: string, description: string): string[] {
+  const text = `${heading} ${description}`.toLowerCase();
+  if (
+    text.includes("beach") ||
+    text.includes("sea") ||
+    text.includes("ocean") ||
+    text.includes("coast") ||
+    text.includes("shore") ||
+    text.includes("surf")
+  ) {
+    return ["Goa (Palolem)", "Gokarna (Om Beach)", "Udupi (Kapu)", "Varkala"];
+  }
+  if (
+    text.includes("mountain") ||
+    text.includes("hill") ||
+    text.includes("valley") ||
+    text.includes("snow") ||
+    text.includes("peak") ||
+    text.includes("cliff")
+  ) {
+    return ["Manali (Solang)", "Munnar", "Ooty", "Leh-Ladakh"];
+  }
+  if (
+    text.includes("palace") ||
+    text.includes("fort") ||
+    text.includes("royal") ||
+    text.includes("castle") ||
+    text.includes("haveli")
+  ) {
+    return ["Udaipur (City Palace)", "Jaipur (Amer Fort)", "Mysore Palace", "Chettinad"];
+  }
+  if (
+    text.includes("forest") ||
+    text.includes("jungle") ||
+    text.includes("woods") ||
+    text.includes("tree")
+  ) {
+    return ["Wayanad", "Coorg", "Dandeli", "Jim Corbett"];
+  }
+  if (
+    text.includes("lake") ||
+    text.includes("backwater") ||
+    text.includes("river") ||
+    text.includes("boat")
+  ) {
+    return ["Alappuzha (Alleppey)", "Kumarakom", "Dal Lake", "Rishikesh"];
+  }
+  if (
+    text.includes("coffee") ||
+    text.includes("tea") ||
+    text.includes("plantation") ||
+    text.includes("estate")
+  ) {
+    return ["Chikmagalur", "Coorg", "Munnar", "Valparai"];
+  }
+  if (
+    text.includes("temple") ||
+    text.includes("ghat") ||
+    text.includes("shrine") ||
+    text.includes("ashram")
+  ) {
+    return ["Varanasi Ghats", "Rishikesh", "Hampi", "Madurai"];
+  }
+  if (
+    text.includes("city") ||
+    text.includes("street") ||
+    text.includes("alley") ||
+    text.includes("urban") ||
+    text.includes("club") ||
+    text.includes("bar")
+  ) {
+    return ["Mumbai (Colaba)", "Old Delhi", "Bangalore (MG Rd)", "London (Soho)"];
+  }
+  return ["Goa (Palolem)", "Manali", "Udaipur", "Gokarna"];
+}
 
 export function BoardTab({ story }: { story: Story }) {
   const qc = useQueryClient();
@@ -72,14 +251,21 @@ export function BoardTab({ story }: { story: Story }) {
   const [painting, setPainting] = useState<Record<string, boolean>>({});
   const [editingFrameId, setEditingFrameId] = useState<string | null>(null);
 
-  // Compute breakdown stats
+  // Real-world location scouting state
+  const [scoutingLocations, setScoutingLocations] = useState(false);
+  const [scoutDialogOpen, setScoutDialogOpen] = useState(false);
+  const [scoutedLocations, setScoutedLocations] = useState<SuggestedLocation[]>([]);
+  const [savingScoutedToBible, setSavingScoutedToBible] = useState(false);
+  const [applyingToFrames, setApplyingToFrames] = useState(false);
+
+  // Compute breakdown stats using robust classification
   const stats = {
-    day: frames.filter((f) => (f.lighting || "").toLowerCase() === "day"),
-    night: frames.filter((f) => (f.lighting || "").toLowerCase() === "night"),
-    cloudy: frames.filter((f) => (f.lighting || "").toLowerCase() === "cloudy"),
-    rainy: frames.filter((f) => (f.lighting || "").toLowerCase() === "rainy"),
-    golden_hour: frames.filter((f) => (f.lighting || "").toLowerCase() === "golden_hour"),
-    interior: frames.filter((f) => (f.lighting || "").toLowerCase() === "interior"),
+    day: frames.filter((f) => getFrameLightingCategory(f) === "day"),
+    night: frames.filter((f) => getFrameLightingCategory(f) === "night"),
+    golden_hour: frames.filter((f) => getFrameLightingCategory(f) === "golden_hour"),
+    cloudy: frames.filter((f) => getFrameLightingCategory(f) === "cloudy"),
+    rainy: frames.filter((f) => getFrameLightingCategory(f) === "rainy"),
+    interior: frames.filter((f) => getFrameLightingCategory(f) === "interior"),
   };
 
   async function breakdown() {
@@ -161,6 +347,125 @@ export function BoardTab({ story }: { story: Story }) {
     }
   }
 
+  async function runScoutPlaces() {
+    const text = (story.script.trim() || fullText(chapters)).trim();
+    if (!text) {
+      toast.error("Write or import some chapters or a script first to scout locations.");
+      return;
+    }
+
+    setScoutingLocations(true);
+    const toastId = toast.loading(
+      "Analyzing scenes & scouting real-world filming destinations (e.g. Goa, Gokarna, Udupi)…",
+    );
+    try {
+      const fullResponse = await streamWrite(
+        {
+          mode: "locations",
+          text,
+          title: story.title,
+          style: story.genre || story.style,
+        },
+        () => {},
+      );
+
+      const parsed = parseSuggestedLocations(fullResponse);
+      if (!parsed.locations.length) {
+        throw new Error("No locations suggested. Please try again.");
+      }
+
+      setScoutedLocations(
+        parsed.locations.map((loc, i) => ({
+          ...loc,
+          id: `board-scout-${i}-${Date.now()}`,
+          selected: true,
+        })),
+      );
+
+      toast.success(
+        `Scouted real-world places for ${parsed.locations.length} scene${parsed.locations.length === 1 ? "" : "s"}!`,
+        { id: toastId },
+      );
+      setScoutDialogOpen(true);
+    } catch (e) {
+      toast.error((e as Error).message || "Location scouting failed.", { id: toastId });
+    } finally {
+      setScoutingLocations(false);
+    }
+  }
+
+  async function applyScoutedToFrames() {
+    if (!frames.length || !scoutedLocations.length) return;
+    setApplyingToFrames(true);
+    try {
+      let appliedCount = 0;
+      for (let i = 0; i < frames.length; i++) {
+        const f = frames[i]!;
+        // Match scouted location by index or heading keywords
+        const matched =
+          scoutedLocations.find((loc) => {
+            if (!loc.scene) return false;
+            const sLower = loc.scene.toLowerCase();
+            const fLower = f.heading.toLowerCase();
+            return fLower.includes(sLower) || sLower.includes(fLower);
+          }) || scoutedLocations[i % scoutedLocations.length];
+
+        if (matched) {
+          const chosenPlace = matched.name || matched.selectedPlace || matched.recommendedPlace;
+          if (chosenPlace) {
+            await updateDoc(doc(db, "frames", f.id), { location: chosenPlace });
+            appliedCount++;
+          }
+        }
+      }
+      qc.invalidateQueries({ queryKey: ["frames", story.id] });
+      toast.success(
+        `Applied real filming locations to ${appliedCount} storyboard frame${appliedCount === 1 ? "" : "s"}!`,
+      );
+    } catch (e) {
+      toast.error("Failed to update frames: " + (e as Error).message);
+    } finally {
+      setApplyingToFrames(false);
+    }
+  }
+
+  async function saveScoutedToBible() {
+    setSavingScoutedToBible(true);
+    const uid = auth.currentUser?.uid ?? "";
+    try {
+      const selected = scoutedLocations.filter((l) => l.selected && (l.name.trim() || l.selectedPlace?.trim()));
+      for (const loc of selected) {
+        const placeName = (loc.name.trim() || loc.selectedPlace?.trim() || "Location").trim();
+        const fullDesc = [
+          loc.description.trim(),
+          "",
+          loc.scene ? `Scene: ${loc.scene}${loc.sceneType ? ` (${loc.sceneType})` : ""}` : "",
+          loc.suggestedPlaces && loc.suggestedPlaces.length > 0
+            ? `Scouted Filming Places: ${loc.suggestedPlaces.join(" • ")}`
+            : "",
+          loc.productionNotes ? `Filming Notes: ${loc.productionNotes}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        await addDoc(collection(db, "bible_entries"), {
+          userId: uid,
+          storyId: story.id,
+          kind: "place",
+          name: placeName,
+          description: fullDesc.trim(),
+          createdAt: serverTimestamp(),
+        });
+      }
+      qc.invalidateQueries({ queryKey: ["bible", story.id] });
+      toast.success(`Saved ${selected.length} real locations to Story Bible Places!`);
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to save places.");
+    } finally {
+      setSavingScoutedToBible(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -168,6 +473,15 @@ export function BoardTab({ story }: { story: Story }) {
           <Button disabled={busy} onClick={breakdown}>
             <Sparkles className="mr-2 h-4 w-4" />
             {busy ? "Analyzing & Breaking down…" : "Break into scenes"}
+          </Button>
+          <Button
+            variant="outline"
+            disabled={scoutingLocations || (!story.script.trim() && !chapters.length)}
+            onClick={runScoutPlaces}
+            className="border-sepia/30 bg-sepia/5 hover:bg-sepia/15 text-foreground"
+          >
+            <Compass className="mr-2 h-4 w-4 text-sepia" />
+            {scoutingLocations ? "Scouting Places…" : "Scout Scene Places"}
           </Button>
           <Button
             variant="secondary"
@@ -195,7 +509,7 @@ export function BoardTab({ story }: { story: Story }) {
             <span className="text-xs text-muted-foreground">{frames.length} Total Shots</span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <div className="rounded-md border p-3 bg-background/50">
               <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span className="flex items-center gap-1.5">
@@ -204,7 +518,7 @@ export function BoardTab({ story }: { story: Story }) {
                 <span className="font-mono font-bold text-sm text-foreground">{stats.day.length}</span>
               </div>
               <p className="mt-1 text-[11px] text-muted-foreground line-clamp-1">
-                {stats.day.map((f, i) => `#${i + 1}`).join(", ") || "None"}
+                {stats.day.map((f) => `#${frames.indexOf(f) + 1}`).join(", ") || "None"}
               </p>
             </div>
 
@@ -216,31 +530,55 @@ export function BoardTab({ story }: { story: Story }) {
                 <span className="font-mono font-bold text-sm text-foreground">{stats.night.length}</span>
               </div>
               <p className="mt-1 text-[11px] text-muted-foreground line-clamp-1">
-                {stats.night.map((f, i) => `#${i + 1}`).join(", ") || "None"}
+                {stats.night.map((f) => `#${frames.indexOf(f) + 1}`).join(", ") || "None"}
               </p>
             </div>
 
             <div className="rounded-md border p-3 bg-background/50">
               <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span className="flex items-center gap-1.5">
-                  <Cloud className="h-4 w-4 text-slate-400" /> Cloudy Shots
+                  <Sun className="h-4 w-4 text-orange-400" /> Golden Hour
+                </span>
+                <span className="font-mono font-bold text-sm text-foreground">{stats.golden_hour.length}</span>
+              </div>
+              <p className="mt-1 text-[11px] text-muted-foreground line-clamp-1">
+                {stats.golden_hour.map((f) => `#${frames.indexOf(f) + 1}`).join(", ") || "None"}
+              </p>
+            </div>
+
+            <div className="rounded-md border p-3 bg-background/50">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <Cloud className="h-4 w-4 text-slate-400" /> Cloudy
                 </span>
                 <span className="font-mono font-bold text-sm text-foreground">{stats.cloudy.length}</span>
               </div>
               <p className="mt-1 text-[11px] text-muted-foreground line-clamp-1">
-                {stats.cloudy.map((f, i) => `#${i + 1}`).join(", ") || "None"}
+                {stats.cloudy.map((f) => `#${frames.indexOf(f) + 1}`).join(", ") || "None"}
               </p>
             </div>
 
             <div className="rounded-md border p-3 bg-background/50">
               <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span className="flex items-center gap-1.5">
-                  <CloudRain className="h-4 w-4 text-blue-400" /> Rainy Shots
+                  <CloudRain className="h-4 w-4 text-blue-400" /> Rainy
                 </span>
                 <span className="font-mono font-bold text-sm text-foreground">{stats.rainy.length}</span>
               </div>
               <p className="mt-1 text-[11px] text-muted-foreground line-clamp-1">
-                {stats.rainy.map((f, i) => `#${i + 1}`).join(", ") || "None"}
+                {stats.rainy.map((f) => `#${frames.indexOf(f) + 1}`).join(", ") || "None"}
+              </p>
+            </div>
+
+            <div className="rounded-md border p-3 bg-background/50">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <Layers className="h-4 w-4 text-emerald-500" /> Interior
+                </span>
+                <span className="font-mono font-bold text-sm text-foreground">{stats.interior.length}</span>
+              </div>
+              <p className="mt-1 text-[11px] text-muted-foreground line-clamp-1">
+                {stats.interior.map((f) => `#${frames.indexOf(f) + 1}`).join(", ") || "None"}
               </p>
             </div>
           </div>
@@ -279,15 +617,20 @@ export function BoardTab({ story }: { story: Story }) {
                   )}
 
                   {/* Weather / Lighting badge */}
-                  <div className="absolute top-2 right-2 bg-background/85 backdrop-blur px-2 py-0.5 rounded text-[11px] font-medium flex items-center gap-1 border">
-                    {f.lighting === "night" && <Moon className="h-3 w-3 text-indigo-400" />}
-                    {f.lighting === "rainy" && <CloudRain className="h-3 w-3 text-blue-400" />}
-                    {f.lighting === "cloudy" && <Cloud className="h-3 w-3 text-slate-400" />}
-                    {(f.lighting === "day" || !f.lighting) && <Sun className="h-3 w-3 text-amber-500" />}
-                    {f.lighting === "golden_hour" && <Sun className="h-3 w-3 text-orange-400" />}
-                    {f.lighting === "interior" && <Layers className="h-3 w-3 text-emerald-500" />}
-                    <span className="capitalize">{f.lighting || "Day"}</span>
-                  </div>
+                  {(() => {
+                    const cat = getFrameLightingCategory(f);
+                    return (
+                      <div className="absolute top-2 right-2 bg-background/85 backdrop-blur px-2 py-0.5 rounded text-[11px] font-medium flex items-center gap-1 border shadow-xs">
+                        {cat === "night" && <Moon className="h-3 w-3 text-indigo-400" />}
+                        {cat === "rainy" && <CloudRain className="h-3 w-3 text-blue-400" />}
+                        {cat === "cloudy" && <Cloud className="h-3 w-3 text-slate-400" />}
+                        {cat === "day" && <Sun className="h-3 w-3 text-amber-500" />}
+                        {cat === "golden_hour" && <Sun className="h-3 w-3 text-orange-400" />}
+                        {cat === "interior" && <Layers className="h-3 w-3 text-emerald-500" />}
+                        <span className="capitalize">{cat.replace("_", " ")}</span>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="p-4 space-y-3">
@@ -313,7 +656,7 @@ export function BoardTab({ story }: { story: Story }) {
                         <div className="space-y-1">
                           <label className="text-[11px] text-muted-foreground">Lighting & Weather</label>
                           <Select
-                            value={f.lighting || "day"}
+                            value={getFrameLightingCategory(f)}
                             onValueChange={(val) => updateFrameField(f.id, { lighting: val })}
                           >
                             <SelectTrigger className="h-7 text-xs">
@@ -328,14 +671,42 @@ export function BoardTab({ story }: { story: Story }) {
                             </SelectContent>
                           </Select>
                         </div>
-                        <div className="space-y-1">
-                          <label className="text-[11px] text-muted-foreground">Location</label>
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] text-muted-foreground flex items-center gap-1">
+                              <MapPin className="h-3 w-3 text-sepia" /> Filming Location / Place
+                            </label>
+                            <span className="text-[10px] text-muted-foreground font-mono">Real-world places</span>
+                          </div>
                           <Input
+                            key={f.location || "empty-loc"}
                             defaultValue={f.location || ""}
-                            placeholder="e.g. Abandoned Warehouse, London Flat"
+                            placeholder="e.g. Goa (Palolem Beach), Gokarna (Om Beach), Udupi"
                             className="h-7 text-xs font-sans"
                             onBlur={(e) => updateFrameField(f.id, { location: e.target.value })}
                           />
+                          <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                            <span className="text-[10px] text-muted-foreground font-mono">Scouted:</span>
+                            {getQuickScenePlaces(f.heading, f.description).map((place) => {
+                              const isMatch = (f.location || "")
+                                .toLowerCase()
+                                .includes(place.toLowerCase().split(" ")[0] || "");
+                              return (
+                                <button
+                                  key={place}
+                                  type="button"
+                                  onClick={() => updateFrameField(f.id, { location: place })}
+                                  className={`px-1.5 py-0.5 rounded text-[10px] transition-colors border ${
+                                    isMatch
+                                      ? "bg-sepia text-white border-sepia font-medium"
+                                      : "bg-muted/50 hover:bg-sepia/10 border-border text-foreground hover:border-sepia/30"
+                                  }`}
+                                >
+                                  {place}
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
                         <div className="space-y-1">
                           <label className="text-[11px] text-muted-foreground">Cast / Actors</label>
@@ -397,8 +768,247 @@ export function BoardTab({ story }: { story: Story }) {
           );
         })}
       </div>
+
+      {/* Real-World Location Scout Dialog for Board */}
+      <Dialog open={scoutDialogOpen} onOpenChange={setScoutDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col p-6 overflow-hidden">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-display flex items-center gap-2">
+              <Compass className="h-5 w-5 text-sepia" />
+              Scout Real-World Places for Storyboard Scenes
+            </DialogTitle>
+            <DialogDescription>
+              Scouted authentic real-world filming places for each scene in your story (e.g. Goa, Gokarna, Udupi for beach scenes; Manali/Munnar for mountains). Select preferred destinations to apply to your storyboard frames or save to Story Bible Places.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto space-y-4 pr-1 pt-3 min-h-0">
+            {scoutedLocations.map((loc, idx) => (
+              <div
+                key={loc.id || idx}
+                className={`p-4 rounded-lg border transition-all ${
+                  loc.selected ? "border-sepia/40 bg-card shadow-sm" : "border-border/50 opacity-60 bg-muted/20"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={loc.selected ?? true}
+                      onChange={(e) => {
+                        const updated = [...scoutedLocations];
+                        updated[idx] = { ...updated[idx]!, selected: e.target.checked };
+                        setScoutedLocations(updated);
+                      }}
+                      className="rounded h-4 w-4 accent-primary shrink-0"
+                    />
+                    <div className="flex flex-wrap items-center gap-2 min-w-0">
+                      <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-sepia/10 text-sepia border border-sepia/20 flex items-center gap-1 shrink-0">
+                        <Film className="h-3 w-3" />
+                        {loc.scene || "Major Scene"}
+                      </span>
+                      {loc.sceneType && (
+                        <span className="text-[11px] font-sans px-2 py-0.5 rounded-full bg-muted text-muted-foreground border">
+                          {loc.sceneType}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setScoutedLocations(scoutedLocations.filter((_, i) => i !== idx))
+                    }
+                    className="text-muted-foreground hover:text-destructive transition-colors shrink-0 p-1"
+                    aria-label="Remove item"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+
+                {loc.suggestedPlaces && loc.suggestedPlaces.length > 0 && (
+                  <div className="mb-3 rounded-md bg-muted/30 p-2.5 border border-border/60">
+                    <div className="text-[11px] font-mono uppercase tracking-wider text-sepia mb-1.5 flex items-center gap-1.5 font-medium">
+                      <MapPin className="h-3 w-3" />
+                      Suggested Real-World Places (click to select):
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {loc.suggestedPlaces.map((place) => {
+                        const isChosen = loc.name === place || loc.selectedPlace === place;
+                        return (
+                          <button
+                            key={place}
+                            type="button"
+                            onClick={() => {
+                              const updated = [...scoutedLocations];
+                              updated[idx] = {
+                                ...updated[idx]!,
+                                selectedPlace: place,
+                                name: place,
+                              };
+                              setScoutedLocations(updated);
+                            }}
+                            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 border ${
+                              isChosen
+                                ? "bg-sepia text-white border-sepia shadow-sm ring-1 ring-sepia"
+                                : "bg-background hover:bg-sepia/10 border-border text-foreground hover:border-sepia/40"
+                            }`}
+                          >
+                            <MapPin className="h-3 w-3 shrink-0" />
+                            <span>{place}</span>
+                            {isChosen && <Check className="h-3 w-3 ml-0.5 shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div className="mb-3 space-y-1">
+                  <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                    Selected Filming Place
+                  </label>
+                  <Input
+                    value={loc.name}
+                    onChange={(e) => {
+                      const updated = [...scoutedLocations];
+                      updated[idx] = { ...updated[idx]!, name: e.target.value };
+                      setScoutedLocations(updated);
+                    }}
+                    placeholder="e.g. Goa (Palolem Beach), Gokarna (Om Beach), Udupi"
+                    className="font-bold text-sm h-8 bg-background"
+                  />
+                </div>
+
+                <div className="mb-2.5 space-y-1">
+                  <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                    Cinematic Atmosphere & Scene Fit
+                  </label>
+                  <Textarea
+                    value={loc.description}
+                    onChange={(e) => {
+                      const updated = [...scoutedLocations];
+                      updated[idx] = { ...updated[idx]!, description: e.target.value };
+                      setScoutedLocations(updated);
+                    }}
+                    placeholder="Visual landscape, sensory details (surf, golden hour, cliffs), mood…"
+                    className="text-xs min-h-16 font-serif leading-relaxed"
+                  />
+                </div>
+
+                {loc.productionNotes && (
+                  <div className="rounded border border-amber-500/20 bg-amber-500/5 px-2.5 py-1.5 text-[11px] text-muted-foreground flex items-start gap-1.5">
+                    <Lightbulb className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />
+                    <span>
+                      <strong className="text-foreground">Filming Notes:</strong> {loc.productionNotes}
+                    </span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <DialogFooter className="mt-4 pt-3 border-t flex flex-wrap items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground">
+              {scoutedLocations.filter((l) => l.selected).length} of {scoutedLocations.length} place{scoutedLocations.length === 1 ? "" : "s"} selected
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setScoutDialogOpen(false)}
+              >
+                Close
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={saveScoutedToBible}
+                disabled={savingScoutedToBible || scoutedLocations.filter((l) => l.selected).length === 0}
+              >
+                <Plus className="mr-1.5 h-4 w-4" />
+                {savingScoutedToBible ? "Saving Places…" : "Save to Story Bible Places"}
+              </Button>
+              <Button
+                type="button"
+                onClick={applyScoutedToFrames}
+                disabled={applyingToFrames || !frames.length || scoutedLocations.filter((l) => l.selected).length === 0}
+              >
+                <CheckCircle2 className="mr-2 h-4 w-4" />
+                {applyingToFrames ? "Applying…" : "Apply Places to Frames"}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
+}
+
+// Helper to sanitize text for standard PDF WinAnsi fonts (removes emojis and strips corrupt glyphs)
+function sanitizePdfText(str: string | null | undefined): string {
+  if (!str) return "";
+  return (
+    str
+      // Map known emoji prefixes or corrupted WinAnsi byte sequences
+      .replace(/(?:🎬|Ø<ß¬)\s*/g, "Scene: ")
+      .replace(/(?:📍|Ø=ÜÍ)\s*/g, "Scouted Filming Places: ")
+      .replace(/(?:💡|Ø=Ü¡)\s*/g, "Filming Notes: ")
+      // Smart punctuation & quotes to standard characters
+      .replace(/[\u2018\u2019]/g, "'")
+      .replace(/[\u201C\u201D]/g, '"')
+      .replace(/[\u2013\u2014]/g, "-")
+      .replace(/\u2026/g, "...")
+      // Strip any other surrogate pair / emoji sequences
+      .replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, "")
+      // Strip control chars except newline and tab
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+      // Keep printable ASCII, Latin-1 supplement, and bullet symbol (\u2022)
+      .replace(/[^\x20-\x7E\xA0-\xFF\u2022\n\r\t]/g, "")
+      .trim()
+  );
+}
+
+interface ParsedPlace {
+  name: string;
+  scene?: string;
+  visualDesc: string;
+  scoutedPlaces?: string;
+  filmingNotes?: string;
+}
+
+function parsePlaceDetails(c: BibleEntry): ParsedPlace {
+  const cleanName = sanitizePdfText(c.name).replace(/\s*\((?:place|character|lore)\)\s*$/i, "").trim();
+  const rawDesc = c.description || "";
+  const lines = rawDesc.split(/\r?\n/);
+
+  let scene = "";
+  let scoutedPlaces = "";
+  let filmingNotes = "";
+  const descParts: string[] = [];
+
+  for (const rawLine of lines) {
+    const line = sanitizePdfText(rawLine).trim();
+    if (!line) continue;
+
+    if (/^(?:\[Scene\]|Scene)\s*:/i.test(line)) {
+      scene = line.replace(/^(?:\[Scene\]|Scene)\s*:\s*/i, "").trim();
+    } else if (/^(?:\[Location\]|Scouted Filming Places|Scouted Places)\s*:/i.test(line)) {
+      scoutedPlaces = line.replace(/^(?:\[Location\]|Scouted Filming Places|Scouted Places)\s*:\s*/i, "").trim();
+    } else if (/^(?:\[Notes\]|Filming Notes|Notes)\s*:/i.test(line)) {
+      filmingNotes = line.replace(/^(?:\[Notes\]|Filming Notes|Notes)\s*:\s*/i, "").trim();
+    } else {
+      descParts.push(line);
+    }
+  }
+
+  return {
+    name: cleanName,
+    scene,
+    visualDesc: descParts.join(" "),
+    scoutedPlaces,
+    filmingNotes,
+  };
 }
 
 function exportDeck(story: Story, bible: BibleEntry[], frames: Frame[]) {
@@ -415,101 +1025,336 @@ function exportDeck(story: Story, bible: BibleEntry[], frames: Frame[]) {
 
   const title = (t: string) => {
     doc.setFont("times", "bold");
-    doc.setFontSize(28);
+    doc.setFontSize(26);
     doc.text(t, M, M + 20);
     doc.setDrawColor(181, 69, 43);
+    doc.setLineWidth(1.2);
     doc.line(M, M + 32, W - M, M + 32);
+    doc.setTextColor(31, 26, 20);
   };
 
-  const body = (t: string, y: number, size = 13) => {
+  const body = (t: string, y: number, size = 13, slideTitle?: string) => {
     doc.setFont("times", "normal");
     doc.setFontSize(size);
-    const lines = doc.splitTextToSize(t, W - M * 2);
-    doc.text(lines, M, y);
-    return y + lines.length * size * 1.3;
+    const lines = doc.splitTextToSize(sanitizePdfText(t), W - M * 2);
+    let curY = y;
+    for (const line of lines) {
+      if (curY > H - M - 20) {
+        doc.addPage();
+        bg();
+        if (slideTitle) title(`${slideTitle} (Cont.)`);
+        curY = M + 70;
+        doc.setFont("times", "normal");
+        doc.setFontSize(size);
+      }
+      doc.text(line, M, curY);
+      curY += size * 1.35;
+    }
+    return curY;
   };
 
-  // 1. Cover Slide
+  // 1. Cover Slide with dynamic auto-fitting title, wrapped text, and vertical centering
   bg();
+  const rawTitle = sanitizePdfText(story.title || "Untitled");
+  const maxTitleWidth = W - M * 2;
+
+  // Dynamically select font size according to title length
+  let titleFontSize = 44;
+  let titleLineHeight = 50;
+  if (rawTitle.length > 55) {
+    titleFontSize = 26;
+    titleLineHeight = 32;
+  } else if (rawTitle.length > 38) {
+    titleFontSize = 32;
+    titleLineHeight = 38;
+  } else if (rawTitle.length > 24) {
+    titleFontSize = 38;
+    titleLineHeight = 44;
+  }
+
   doc.setFont("times", "bold");
-  doc.setFontSize(48);
-  doc.text(story.title || "Untitled", M, H / 2 - 20);
-  doc.setFontSize(14);
-  doc.setTextColor(181, 69, 43);
-  doc.text((story.genre || "").toUpperCase(), M, H / 2 + 10);
+  doc.setFontSize(titleFontSize);
+  let titleLines = doc.splitTextToSize(rawTitle, maxTitleWidth);
+
+  // If text wraps to more than 3 lines, step down font size
+  while (titleLines.length > 3 && titleFontSize > 22) {
+    titleFontSize -= 3;
+    titleLineHeight = Math.round(titleFontSize * 1.22);
+    doc.setFontSize(titleFontSize);
+    titleLines = doc.splitTextToSize(rawTitle, maxTitleWidth);
+  }
+
+  const genreText = sanitizePdfText(story.genre || "").toUpperCase();
+  const loglineText = sanitizePdfText(story.logline || "");
+
+  doc.setFont("times", "normal");
+  doc.setFontSize(15);
+  const loglineLines = loglineText ? doc.splitTextToSize(loglineText, maxTitleWidth) : [];
+
+  // Center vertical layout on the page
+  const titleBlockH = titleLines.length * titleLineHeight;
+  const genreH = genreText ? 24 : 0;
+  const loglineH = loglineLines.length * 21;
+  const gap1 = genreText ? 14 : 0;
+  const gap2 = loglineText ? 24 : 0;
+  const totalContentH = titleBlockH + gap1 + genreH + gap2 + loglineH;
+
+  let curCoverY = Math.max(M + 40, (H - totalContentH) / 2 + titleFontSize * 0.75);
+
+  // Render Title
+  doc.setFont("times", "bold");
+  doc.setFontSize(titleFontSize);
   doc.setTextColor(31, 26, 20);
-  body(story.logline, H / 2 + 40, 16);
+  titleLines.forEach((line: string) => {
+    doc.text(line, M, curCoverY);
+    curCoverY += titleLineHeight;
+  });
+
+  // Render Genre
+  if (genreText) {
+    curCoverY += gap1 - (titleLineHeight - titleFontSize);
+    doc.setFont("times", "bold");
+    doc.setFontSize(13);
+    doc.setTextColor(181, 69, 43);
+    doc.text(genreText, M, curCoverY);
+    curCoverY += 16;
+  }
+
+  // Render Logline
+  if (loglineLines.length) {
+    curCoverY += gap2 - (genreText ? 16 : 0);
+    doc.setFont("times", "normal");
+    doc.setFontSize(15);
+    doc.setTextColor(31, 26, 20);
+    loglineLines.forEach((line: string) => {
+      doc.text(line, M, curCoverY);
+      curCoverY += 21;
+    });
+  }
 
   // 2. Synopsis Slide
   doc.addPage();
   bg();
   title("Synopsis");
-  body(story.synopsis || "—", M + 70);
+  body(story.synopsis || "—", M + 70, 13, "Synopsis");
 
-  // 3. Characters & World Slide
-  const chars = bible.filter((b) => b.name.trim());
-  if (chars.length) {
+  // 3. Characters & Cast Slide(s)
+  const characters = bible.filter((b) => b.kind === "character" && b.name.trim());
+  if (characters.length) {
     doc.addPage();
     bg();
-    title("Characters & World");
+    title("Characters & Cast");
     let y = M + 70;
-    for (const c of chars) {
-      if (y > H - M - 40) {
+
+    for (const c of characters) {
+      const cleanName = sanitizePdfText(c.name).replace(/\s*\((?:character|place|lore)\)\s*$/i, "").trim();
+      const castActor = sanitizePdfText(c.cast || "").trim();
+      const cleanDesc = sanitizePdfText(c.description || "").trim();
+
+      const descLines = cleanDesc ? doc.splitTextToSize(cleanDesc, W - M * 2) : [];
+      const neededHeight = 22 + (descLines.length ? descLines.length * 15 + 4 : 0) + 16;
+
+      if (y + neededHeight > H - M - 20) {
         doc.addPage();
         bg();
-        y = M + 40;
+        title("Characters & Cast (Cont.)");
+        y = M + 70;
       }
+
       doc.setFont("times", "bold");
-      doc.setFontSize(15);
-      const castLabel = c.cast?.trim() ? `   [Cast / Actor: ${c.cast.trim()}]` : "";
-      doc.text(`${c.name} (${c.kind})${castLabel}`, M, y);
-      y = body(c.description, y + 18, 12) + 14;
+      doc.setFontSize(14);
+      doc.setTextColor(31, 26, 20);
+      doc.text(cleanName, M, y);
+
+      if (castActor) {
+        const nameW = doc.getTextWidth(cleanName);
+        doc.setFont("times", "italic");
+        doc.setFontSize(11);
+        doc.setTextColor(181, 69, 43);
+        doc.text(`   [Portrayed by: ${castActor}]`, M + nameW, y);
+      }
+
+      if (descLines.length) {
+        doc.setFont("times", "normal");
+        doc.setFontSize(11.5);
+        doc.setTextColor(50, 42, 35);
+        doc.text(descLines, M, y + 16);
+        y += 16 + descLines.length * 15 + 16;
+      } else {
+        y += 24;
+      }
     }
   }
 
-  // 4. Production Breakdown Slide (Shots by Lighting, Weather, Locations, Props, Cast)
+  // 4. Filming Locations & Setting Slide(s)
+  const places = bible.filter((b) => b.kind === "place" && b.name.trim());
+  if (places.length) {
+    doc.addPage();
+    bg();
+    title("Filming Locations & Setting");
+    let y = M + 70;
+
+    for (const p of places) {
+      const parsed = parsePlaceDetails(p);
+
+      const nameLines = doc.splitTextToSize(parsed.name, W - M * 2);
+      const sceneLines = parsed.scene ? doc.splitTextToSize(`SCENE: ${parsed.scene}`, W - M * 2) : [];
+      const descLines = parsed.visualDesc ? doc.splitTextToSize(parsed.visualDesc, W - M * 2) : [];
+      const optLines = parsed.scoutedPlaces
+        ? doc.splitTextToSize(`• Alternative Locations: ${parsed.scoutedPlaces}`, W - M * 2 - 12)
+        : [];
+      const notesLines = parsed.filmingNotes
+        ? doc.splitTextToSize(`• Production Notes: ${parsed.filmingNotes}`, W - M * 2 - 12)
+        : [];
+
+      const neededHeight =
+        nameLines.length * 16 +
+        (sceneLines.length ? sceneLines.length * 13 + 3 : 0) +
+        (descLines.length ? descLines.length * 14 + 5 : 0) +
+        (optLines.length ? optLines.length * 13 + 3 : 0) +
+        (notesLines.length ? notesLines.length * 13 + 3 : 0) +
+        18;
+
+      if (y + neededHeight > H - M - 20) {
+        doc.addPage();
+        bg();
+        title("Filming Locations & Setting (Cont.)");
+        y = M + 70;
+      }
+
+      // Location Name
+      doc.setFont("times", "bold");
+      doc.setFontSize(13.5);
+      doc.setTextColor(31, 26, 20);
+      doc.text(nameLines, M, y);
+      y += nameLines.length * 16;
+
+      // Filmic Scene Context (if present)
+      if (sceneLines.length) {
+        doc.setFont("times", "bold");
+        doc.setFontSize(10);
+        doc.setTextColor(181, 69, 43);
+        doc.text(sceneLines, M, y);
+        y += sceneLines.length * 13 + 3;
+      }
+
+      // Visual Description
+      if (descLines.length) {
+        doc.setFont("times", "normal");
+        doc.setFontSize(11);
+        doc.setTextColor(45, 38, 30);
+        doc.text(descLines, M, y);
+        y += descLines.length * 14 + 5;
+      }
+
+      // Alternative Scouted Options
+      if (optLines.length) {
+        doc.setFont("times", "normal");
+        doc.setFontSize(10);
+        doc.setTextColor(90, 75, 65);
+        doc.text(optLines, M + 12, y);
+        y += optLines.length * 13 + 3;
+      }
+
+      // Production Notes
+      if (notesLines.length) {
+        doc.setFont("times", "normal");
+        doc.setFontSize(10);
+        doc.setTextColor(90, 75, 65);
+        doc.text(notesLines, M + 12, y);
+        y += notesLines.length * 13 + 3;
+      }
+
+      y += 12; // Gap to next location card
+    }
+  }
+
+  // 5. World Lore & Thematic Rules Slide(s)
+  const lore = bible.filter((b) => b.kind === "lore" && b.name.trim());
+  if (lore.length) {
+    doc.addPage();
+    bg();
+    title("World Lore & Thematic Rules");
+    let y = M + 70;
+
+    for (const l of lore) {
+      const cleanName = sanitizePdfText(l.name).replace(/\s*\((?:character|place|lore)\)\s*$/i, "").trim();
+      const cleanDesc = sanitizePdfText(l.description || "").trim();
+
+      const descLines = cleanDesc ? doc.splitTextToSize(cleanDesc, W - M * 2) : [];
+      const neededHeight = 22 + (descLines.length ? descLines.length * 15 + 4 : 0) + 16;
+
+      if (y + neededHeight > H - M - 20) {
+        doc.addPage();
+        bg();
+        title("World Lore & Thematic Rules (Cont.)");
+        y = M + 70;
+      }
+
+      doc.setFont("times", "bold");
+      doc.setFontSize(14);
+      doc.setTextColor(181, 69, 43);
+      doc.text(cleanName, M, y);
+
+      if (descLines.length) {
+        doc.setFont("times", "normal");
+        doc.setFontSize(11.5);
+        doc.setTextColor(31, 26, 20);
+        doc.text(descLines, M, y + 16);
+        y += 16 + descLines.length * 15 + 16;
+      } else {
+        y += 24;
+      }
+    }
+  }
+
+  // 6. Production Breakdown Slide (Shots by Lighting, Weather, Locations, Props, Cast)
   if (frames.length) {
     doc.addPage();
     bg();
     title("Production & Shot Breakdown");
 
-    const dayShots = frames.filter((f) => (f.lighting || "").toLowerCase() === "day");
-    const nightShots = frames.filter((f) => (f.lighting || "").toLowerCase() === "night");
-    const cloudyShots = frames.filter((f) => (f.lighting || "").toLowerCase() === "cloudy");
-    const rainyShots = frames.filter((f) => (f.lighting || "").toLowerCase() === "rainy");
+    const dayShots = frames.filter((f) => getFrameLightingCategory(f) === "day");
+    const nightShots = frames.filter((f) => getFrameLightingCategory(f) === "night");
+    const goldenShots = frames.filter((f) => getFrameLightingCategory(f) === "golden_hour");
+    const weatherIntShots = frames.filter((f) =>
+      ["cloudy", "rainy", "interior"].includes(getFrameLightingCategory(f)),
+    );
 
     let y = M + 65;
 
-    // Summary Box
+    // Summary Box with accurate totals
     doc.setFillColor(235, 227, 212);
     doc.roundedRect(M, y, W - M * 2, 45, 4, 4, "F");
     doc.setFont("times", "bold");
-    doc.setFontSize(13);
+    doc.setFontSize(11);
     doc.setTextColor(181, 69, 43);
-    doc.text("SHOT SCHEDULE & LIGHTING TOTALS:", M + 15, y + 26);
+    const summaryLabel = "SHOT SCHEDULE & LIGHTING TOTALS:";
+    doc.text(summaryLabel, M + 14, y + 26);
+    const labelW = doc.getTextWidth(summaryLabel);
+
     doc.setTextColor(31, 26, 20);
     doc.setFont("times", "normal");
-    doc.text(
-      `Day: ${dayShots.length}  |  Night: ${nightShots.length}  |  Cloudy: ${cloudyShots.length}  |  Rainy: ${rainyShots.length}  |  Total Frames: ${frames.length}`,
-      M + 260,
-      y + 26,
-    );
+    doc.setFontSize(10.5);
+    const summaryTotalsText = `Day: ${dayShots.length}  |  Night & Evening: ${nightShots.length}  |  Golden Hour: ${goldenShots.length}  |  Weather / Interior: ${weatherIntShots.length}  |  Total Frames: ${frames.length}`;
+    doc.text(summaryTotalsText, M + 14 + labelW + 12, y + 26);
 
     y += 65;
 
     // Detailed Table Columns
     const colW = (W - M * 2) / 4;
     doc.setFont("times", "bold");
-    doc.setFontSize(12);
-    doc.text("DAY SHOTS", M, y);
-    doc.text("NIGHT SHOTS", M + colW, y);
-    doc.text("CLOUDY / OVERCAST", M + colW * 2, y);
-    doc.text("RAINY SHOTS", M + colW * 3, y);
+    doc.setFontSize(11);
+    doc.text(`DAY SHOTS (${dayShots.length})`, M, y);
+    doc.text(`NIGHT & EVENING (${nightShots.length})`, M + colW, y);
+    doc.text(`GOLDEN HOUR (${goldenShots.length})`, M + colW * 2, y);
+    doc.text(`WEATHER & INTERIOR (${weatherIntShots.length})`, M + colW * 3, y);
 
     doc.setDrawColor(181, 69, 43);
+    doc.setLineWidth(1.2);
     doc.line(M, y + 4, W - M, y + 4);
 
-    const renderShotList = (shots: Frame[], startX: number, startY: number) => {
+    const renderShotList = (shots: Frame[], startX: number, startY: number, maxRows = 11) => {
       let curY = startY + 16;
       doc.setFont("times", "normal");
       doc.setFontSize(10);
@@ -519,26 +1364,53 @@ function exportDeck(story: Story, bible: BibleEntry[], frames: Frame[]) {
         doc.setTextColor(31, 26, 20);
         return;
       }
-      shots.forEach((s) => {
+      shots.slice(0, maxRows).forEach((s) => {
         if (curY > H - M - 20) return;
         const sceneNum = frames.indexOf(s) + 1;
+        const locOrHeading = s.location || s.heading.slice(0, 24);
         doc.setFont("times", "bold");
-        doc.text(`#${sceneNum}: ${s.location || s.heading.slice(0, 24)}`, startX, curY);
+        const titleLines = doc.splitTextToSize(`#${sceneNum}: ${sanitizePdfText(locOrHeading)}`, colW - 14);
+        doc.text(titleLines[0] || "", startX, curY);
         curY += 12;
         doc.setFont("times", "normal");
-        const desc = doc.splitTextToSize(s.description, colW - 15);
+        const desc = doc.splitTextToSize(sanitizePdfText(s.description), colW - 14);
         doc.text(desc[0] || "", startX, curY);
-        curY += 18;
+        curY += 16;
       });
     };
 
     renderShotList(dayShots, M, y);
     renderShotList(nightShots, M + colW, y);
-    renderShotList(cloudyShots, M + colW * 2, y);
-    renderShotList(rainyShots, M + colW * 3, y);
+    renderShotList(goldenShots, M + colW * 2, y);
+    renderShotList(weatherIntShots, M + colW * 3, y);
+
+    // If any column has more than 11 shots, add a continuation slide
+    const maxCount = Math.max(dayShots.length, nightShots.length, goldenShots.length, weatherIntShots.length);
+    if (maxCount > 11) {
+      doc.addPage();
+      bg();
+      title("Production & Shot Breakdown (Cont.)");
+      const contY = M + 70;
+
+      doc.setFont("times", "bold");
+      doc.setFontSize(11);
+      doc.text(`DAY SHOTS (CONT.)`, M, contY);
+      doc.text(`NIGHT & EVENING (CONT.)`, M + colW, contY);
+      doc.text(`GOLDEN HOUR (CONT.)`, M + colW * 2, contY);
+      doc.text(`WEATHER & INTERIOR (CONT.)`, M + colW * 3, contY);
+
+      doc.setDrawColor(181, 69, 43);
+      doc.setLineWidth(1.2);
+      doc.line(M, contY + 4, W - M, contY + 4);
+
+      renderShotList(dayShots.slice(11), M, contY);
+      renderShotList(nightShots.slice(11), M + colW, contY);
+      renderShotList(goldenShots.slice(11), M + colW * 2, contY);
+      renderShotList(weatherIntShots.slice(11), M + colW * 3, contY);
+    }
   }
 
-  // 5. Locations, Cast & Props Master Manifest Slide
+  // 7. Locations, Cast & Props Master Manifest Slide
   const allLocations = Array.from(new Set(frames.map((f) => f.location).filter(Boolean)));
   const allCast = Array.from(
     new Set(
@@ -574,14 +1446,20 @@ function exportDeck(story: Story, bible: BibleEntry[], frames: Frame[]) {
     doc.line(M, y + 4, M + thirdW - 20, y + 4);
     doc.setTextColor(31, 26, 20);
     doc.setFont("times", "normal");
-    doc.setFontSize(11);
+    doc.setFontSize(10.5);
     let locY = y + 20;
     allLocations.forEach((loc) => {
-      doc.text(`• ${loc}`, M, locY);
-      locY += 16;
+      if (locY > H - M - 20) return;
+      const cleanLoc = sanitizePdfText(loc);
+      const lines = doc.splitTextToSize(`• ${cleanLoc}`, thirdW - 25);
+      lines.forEach((l: string) => {
+        doc.text(l, M, locY);
+        locY += 14;
+      });
+      locY += 2;
     });
 
-    // Cast Column (Characters vs Cast Actors)
+    // Cast Column
     doc.setFont("times", "bold");
     doc.setFontSize(14);
     doc.setTextColor(181, 69, 43);
@@ -589,15 +1467,16 @@ function exportDeck(story: Story, bible: BibleEntry[], frames: Frame[]) {
     doc.line(M + thirdW, y + 4, M + thirdW * 2 - 20, y + 4);
     doc.setTextColor(31, 26, 20);
     doc.setFont("times", "normal");
-    doc.setFontSize(11);
+    doc.setFontSize(10.5);
     let castY = y + 20;
 
-    // First list characters with their attached cast actors from Story Bible
     const charEntries = bible.filter((b) => b.kind === "character" && b.name.trim());
     if (charEntries.length) {
       charEntries.forEach((c) => {
         if (castY > H - M - 20) return;
-        const lineText = c.cast?.trim() ? `• ${c.name} — played by ${c.cast.trim()}` : `• ${c.name} (TBD Cast)`;
+        const cName = sanitizePdfText(c.name).replace(/\s*\((?:character|place|lore)\)\s*$/i, "").trim();
+        const cCast = sanitizePdfText(c.cast || "").trim();
+        const lineText = cCast ? `• ${cName} — played by ${cCast}` : `• ${cName} (TBD Cast)`;
         const lines = doc.splitTextToSize(lineText, thirdW - 25);
         lines.forEach((l: string) => {
           doc.text(l, M + thirdW, castY);
@@ -607,14 +1486,14 @@ function exportDeck(story: Story, bible: BibleEntry[], frames: Frame[]) {
       });
     }
 
-    // Also include any storyboard-specific cast not already shown
     const knownNames = new Set(charEntries.flatMap((c) => [c.name.toLowerCase(), (c.cast || "").toLowerCase()]));
     const additionalCast = allCast.filter((act) => !knownNames.has(act.toLowerCase()));
     if (additionalCast.length) {
       additionalCast.forEach((actor) => {
         if (castY > H - M - 20) return;
-        doc.text(`• ${actor} (Storyboard Cast)`, M + thirdW, castY);
-        castY += 16;
+        const cleanAct = sanitizePdfText(actor);
+        doc.text(`• ${cleanAct} (Storyboard Cast)`, M + thirdW, castY);
+        castY += 15;
       });
     }
 
@@ -626,15 +1505,34 @@ function exportDeck(story: Story, bible: BibleEntry[], frames: Frame[]) {
     doc.line(M + thirdW * 2, y + 4, W - M, y + 4);
     doc.setTextColor(31, 26, 20);
     doc.setFont("times", "normal");
-    doc.setFontSize(11);
+    doc.setFontSize(10.5);
+
+    const isDoubleCol = allProps.length > 16;
+    const subColW = isDoubleCol ? (thirdW - 14) / 2 : thirdW - 10;
+    let propSubCol = 0;
     let propY = y + 20;
+    const propStartY = y + 20;
+    const maxPropY = H - M - 20;
+
     allProps.forEach((prop) => {
-      doc.text(`• ${prop}`, M + thirdW * 2, propY);
-      propY += 16;
+      const cleanProp = sanitizePdfText(prop);
+      if (!cleanProp) return;
+      if (propY > maxPropY) {
+        if (isDoubleCol && propSubCol === 0) {
+          propSubCol = 1;
+          propY = propStartY;
+        } else {
+          return;
+        }
+      }
+      const pX = M + thirdW * 2 + (propSubCol === 1 ? subColW + 10 : 0);
+      const lines = doc.splitTextToSize(`• ${cleanProp}`, subColW);
+      doc.text(lines[0] || "", pX, propY);
+      propY += 14.5;
     });
   }
 
-  // 6. Moodboard Slide
+  // 8. Moodboard Slide
   const imgs = frames.filter((f) => f.image_url);
   if (imgs.length) {
     doc.addPage();
@@ -656,7 +1554,7 @@ function exportDeck(story: Story, bible: BibleEntry[], frames: Frame[]) {
       );
   }
 
-  // 7. Individual Storyboard Scene Slides
+  // 9. Individual Storyboard Scene Slides
   frames.forEach((f, i) => {
     doc.addPage();
     bg();
@@ -678,41 +1576,49 @@ function exportDeck(story: Story, bible: BibleEntry[], frames: Frame[]) {
     const x = W - M - 260;
     doc.setFont("courier", "bold");
     doc.setFontSize(12);
-    doc.text(doc.splitTextToSize(f.heading, 260), x, y + 10);
+    const headLines = doc.splitTextToSize(sanitizePdfText(f.heading), 260);
+    doc.text(headLines, x, y + 10);
+
+    const headH = headLines.length * 14;
 
     // Weather / Lighting tag
     doc.setFont("times", "bold");
     doc.setFontSize(10);
     doc.setTextColor(181, 69, 43);
-    doc.text(`LIGHTING: ${(f.lighting || "DAY").toUpperCase()}`, x, y + 36);
+    doc.text(`LIGHTING: ${(sanitizePdfText(f.lighting) || "DAY").toUpperCase()}`, x, y + 10 + headH + 12);
     doc.setTextColor(31, 26, 20);
 
     doc.setFont("times", "normal");
     doc.setFontSize(11);
-    doc.text(doc.splitTextToSize(f.description, 260), x, y + 54);
+    const descLines = doc.splitTextToSize(sanitizePdfText(f.description), 260);
+    doc.text(descLines, x, y + 10 + headH + 30);
 
-    let metaY = y + 130;
+    let metaY = y + 10 + headH + 30 + descLines.length * 15 + 16;
     if (f.location) {
       doc.setFont("times", "bold");
       doc.text("Location: ", x, metaY);
       doc.setFont("times", "normal");
-      doc.text(f.location, x + 50, metaY);
-      metaY += 18;
+      const locLines = doc.splitTextToSize(sanitizePdfText(f.location), 200);
+      doc.text(locLines, x + 55, metaY);
+      metaY += Math.max(18, locLines.length * 14 + 4);
     }
     if (f.cast) {
       doc.setFont("times", "bold");
       doc.text("Cast: ", x, metaY);
       doc.setFont("times", "normal");
-      doc.text(f.cast, x + 30, metaY);
-      metaY += 18;
+      const castLines = doc.splitTextToSize(sanitizePdfText(f.cast), 220);
+      doc.text(castLines, x + 35, metaY);
+      metaY += Math.max(18, castLines.length * 14 + 4);
     }
     if (f.props) {
       doc.setFont("times", "bold");
       doc.text("Props: ", x, metaY);
       doc.setFont("times", "normal");
-      doc.text(doc.splitTextToSize(f.props, 220), x + 35, metaY);
+      const propsLines = doc.splitTextToSize(sanitizePdfText(f.props), 215);
+      doc.text(propsLines, x + 40, metaY);
     }
   });
 
-  doc.save(`${story.title || "pitch"}-deck.pdf`);
+  const saveFilename = `${sanitizePdfText(story.title).replace(/[^a-zA-Z0-9_-]/g, "_") || "pitch"}-deck.pdf`;
+  doc.save(saveFilename);
 }

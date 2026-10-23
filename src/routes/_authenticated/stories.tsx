@@ -34,12 +34,14 @@ function StoriesPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [uid, setUid] = useState(() => auth.currentUser?.uid ?? "");
+  const [currentUser, setCurrentUser] = useState(() => auth.currentUser);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       setUid(user?.uid ?? "");
+      setCurrentUser(user);
     });
     return unsub;
   }, []);
@@ -168,7 +170,25 @@ function StoriesPage() {
         <Link to="/" className="font-display text-2xl font-extrabold">
           Inkwell
         </Link>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          {currentUser && (
+            <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground mr-1">
+              {currentUser.photoURL ? (
+                <img
+                  src={currentUser.photoURL}
+                  alt={currentUser.displayName || "Avatar"}
+                  className="h-6 w-6 rounded-full border border-border object-cover"
+                />
+              ) : (
+                <div className="h-6 w-6 rounded-full bg-sepia/20 text-sepia font-semibold flex items-center justify-center text-[10px]">
+                  {(currentUser.displayName || currentUser.email || "W")[0]?.toUpperCase()}
+                </div>
+              )}
+              <span className="max-w-[150px] truncate font-medium text-foreground/80">
+                {currentUser.displayName || currentUser.email}
+              </span>
+            </div>
+          )}
           <Button variant="ghost" size="sm" asChild>
             <Link to="/settings">
               <Settings className="mr-2 h-4 w-4" />

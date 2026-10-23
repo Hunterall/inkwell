@@ -2,8 +2,13 @@ import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/integrations/firebase/client";
 
 export type AiSettings = {
+  /** Which text provider to use for writing */
+  textProvider: "openrouter" | "gemini";
   openRouterApiKey: string;
   openRouterModel: string;
+  /** Gemini text generation settings */
+  geminiApiKey: string;
+  geminiModel: string;
   /** Image generation settings — Gemini, Pollinations AI, Cloudflare AI */
   imageGeminiApiKey: string;
   imageGeminiModel: string;
@@ -15,6 +20,33 @@ export type AiSettings = {
   /** Which image provider to use */
   imageProvider: "gemini" | "pollinations" | "cloudflare";
 };
+
+export const POPULAR_GEMINI_TEXT_MODELS = [
+  {
+    id: "gemini-3.8-flash",
+    name: "Gemini 3.8 Flash",
+    tag: "Recommended / Latest",
+    description: "Google's latest flagship flash model. Blazing fast, huge context window, and exceptional prose.",
+  },
+  {
+    id: "gemini-3.8-pro",
+    name: "Gemini 3.8 Pro",
+    tag: "Premium Quality",
+    description: "Top-tier reasoning and nuanced prose, ideal for complex narratives, screenplays, and deep lore.",
+  },
+  {
+    id: "gemini-2.0-flash",
+    name: "Gemini 2.0 Flash",
+    tag: "Reliable",
+    description: "Fast and reliable for everyday drafting, rewriting, and scene breakdowns.",
+  },
+  {
+    id: "gemini-1.5-pro",
+    name: "Gemini 1.5 Pro",
+    tag: "Large Context",
+    description: "Massive 1M token context window for very long manuscripts and screenplays.",
+  },
+];
 
 export const POPULAR_GEMINI_IMAGE_MODELS = [
   { id: "imagen-3.0-generate-002", name: "Imagen 3 (Recommended)" },
@@ -89,8 +121,11 @@ export const POPULAR_MODELS = [
 ];
 
 export const DEFAULT_AI_SETTINGS: AiSettings = {
+  textProvider: "openrouter",
   openRouterApiKey: "",
   openRouterModel: "anthropic/claude-3.5-sonnet",
+  geminiApiKey: "",
+  geminiModel: "gemini-3.8-flash",
   imageGeminiApiKey: "",
   imageGeminiModel: "imagen-3.0-generate-002",
   imagePollinationsApiKey: "",
@@ -100,6 +135,21 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   imageCloudflareModel: "@cf/black-forest-labs/flux-1-schnell",
   imageProvider: "pollinations",
 };
+
+/**
+ * Sanitizes and migrates deprecated Gemini model names (e.g. gemini-2.5-flash -> gemini-3.8-flash)
+ */
+export function sanitizeGeminiModel(model?: string): string {
+  if (!model) return "gemini-3.8-flash";
+  let cleaned = model.trim().replace(/^models\//, "");
+  if (cleaned === "gemini-2.5-flash" || cleaned === "gemini-1.5-flash") {
+    return "gemini-3.8-flash";
+  }
+  if (cleaned === "gemini-2.5-pro") {
+    return "gemini-3.8-pro";
+  }
+  return cleaned || "gemini-3.8-flash";
+}
 
 const LOCAL_STORAGE_KEY = "inkwell_ai_settings_v1";
 
@@ -113,8 +163,14 @@ export function getAiSettings(): AiSettings {
     if (!raw) return DEFAULT_AI_SETTINGS;
     const parsed = JSON.parse(raw) as Partial<AiSettings>;
     return {
+      textProvider:
+        parsed.textProvider === "openrouter" || parsed.textProvider === "gemini"
+          ? parsed.textProvider
+          : DEFAULT_AI_SETTINGS.textProvider,
       openRouterApiKey: parsed.openRouterApiKey?.trim() ?? "",
       openRouterModel: parsed.openRouterModel?.trim() || DEFAULT_AI_SETTINGS.openRouterModel,
+      geminiApiKey: parsed.geminiApiKey?.trim() ?? "",
+      geminiModel: sanitizeGeminiModel(parsed.geminiModel),
       imageGeminiApiKey: parsed.imageGeminiApiKey?.trim() ?? "",
       imageGeminiModel: parsed.imageGeminiModel?.trim() || DEFAULT_AI_SETTINGS.imageGeminiModel,
       imagePollinationsApiKey: parsed.imagePollinationsApiKey?.trim() ?? "",
@@ -143,6 +199,7 @@ export async function saveAiSettings(
 ): Promise<AiSettings> {
   const current = getAiSettings();
   const updated: AiSettings = {
+    textProvider: settings.textProvider ?? current.textProvider,
     openRouterApiKey:
       settings.openRouterApiKey !== undefined
         ? settings.openRouterApiKey.trim()
@@ -151,6 +208,14 @@ export async function saveAiSettings(
       settings.openRouterModel !== undefined
         ? settings.openRouterModel.trim()
         : current.openRouterModel,
+    geminiApiKey:
+      settings.geminiApiKey !== undefined
+        ? settings.geminiApiKey.trim()
+        : current.geminiApiKey,
+    geminiModel:
+      settings.geminiModel !== undefined
+        ? sanitizeGeminiModel(settings.geminiModel)
+        : current.geminiModel,
     imageGeminiApiKey:
       settings.imageGeminiApiKey !== undefined
         ? settings.imageGeminiApiKey.trim()
@@ -216,9 +281,15 @@ export async function loadAiSettings(userId: string): Promise<AiSettings> {
     if (snap.exists()) {
       const data = snap.data() as Partial<AiSettings>;
       const merged: AiSettings = {
+        textProvider:
+          data.textProvider === "openrouter" || data.textProvider === "gemini"
+            ? data.textProvider
+            : local.textProvider,
         openRouterApiKey: data.openRouterApiKey?.trim() || local.openRouterApiKey || "",
         openRouterModel:
           data.openRouterModel?.trim() || local.openRouterModel || DEFAULT_AI_SETTINGS.openRouterModel,
+        geminiApiKey: data.geminiApiKey?.trim() || local.geminiApiKey || "",
+        geminiModel: sanitizeGeminiModel(data.geminiModel || local.geminiModel),
         imageGeminiApiKey: data.imageGeminiApiKey?.trim() || local.imageGeminiApiKey || "",
         imageGeminiModel:
           data.imageGeminiModel?.trim() || local.imageGeminiModel || DEFAULT_AI_SETTINGS.imageGeminiModel,
@@ -305,6 +376,43 @@ export async function verifyOpenRouterKey(apiKey: string): Promise<{
     return {
       valid: false,
       error: (e as Error).message || "Failed to connect to OpenRouter.",
+    };
+  }
+}
+
+/**
+ * Verifies a Gemini API key by making a lightweight models.list call
+ */
+export async function verifyGeminiKey(apiKey: string): Promise<{
+  valid: boolean;
+  error?: string | undefined;
+}> {
+  const cleanKey = apiKey.trim();
+  if (!cleanKey) {
+    return { valid: false, error: "Please enter a Gemini API key." };
+  }
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?pageSize=1&key=${encodeURIComponent(cleanKey)}`,
+    );
+
+    if (!res.ok) {
+      let errorMsg = `Invalid API key (HTTP ${res.status})`;
+      try {
+        const j = await res.json();
+        errorMsg = (j as any)?.error?.message || errorMsg;
+      } catch {
+        /* ignore */
+      }
+      return { valid: false, error: errorMsg };
+    }
+
+    return { valid: true };
+  } catch (e) {
+    return {
+      valid: false,
+      error: (e as Error).message || "Failed to connect to Google Gemini.",
     };
   }
 }

@@ -21,6 +21,13 @@ export async function streamWrite(
     headers["x-openrouter-model"] = aiSettings.openRouterModel;
   }
 
+  if (aiSettings.geminiApiKey) {
+    headers["x-gemini-key"] = aiSettings.geminiApiKey;
+    headers["x-gemini-model"] = aiSettings.geminiModel;
+  }
+
+  headers["x-text-provider"] = aiSettings.textProvider || "openrouter";
+
   const res = await fetch("/api/write", {
     method: "POST",
     headers,
