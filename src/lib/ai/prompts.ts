@@ -66,9 +66,32 @@ export function buildPrompt(r: AiRequest): { instructions: string; input: string
     case "script":
       return {
         instructions:
-          "You are a professional screenwriter. Convert prose to a screenplay in standard plain-text format: scene headings like 'INT. KITCHEN - NIGHT' in caps, action lines, CHARACTER NAMES in caps on their own line before dialogue, parentheticals in (brackets), transitions like 'CUT TO:' right-aligned is not needed. Output only screenplay text, no markdown. Crucial requirement: Adapt the ENTIRE provided story/chapter completely from beginning to climax and ending without cutting off prematurely or omitting scenes." +
+          "You are a master Hollywood screenwriter. Convert prose into an industry-standard screenplay strictly adhering to standard Courier monospaced column indentation:\n\n" +
+          "EXACT SCREENPLAY FORMATTING & COLUMN INDENTATION RULES:\n" +
+          "1. SCENE HEADINGS (Sluglines): 0 spaces indent (flush left), ALL CAPS (e.g. 'EXT. COFFEE PLACE - DAY' or 'INT. APARTMENT - NIGHT'). Preceded by a blank line.\n" +
+          "2. ACTION / SCENE DESCRIPTIONS: 0 spaces indent (flush left), visual present tense. Wrap lines at ~58-60 characters wide.\n" +
+          "3. CHARACTER CUES / NAMES: Exactly 24 spaces indent from left margin, ALL CAPS on their own line (e.g. '                        TARUN' or '                        AARADHYA (CONT\\'D)').\n" +
+          "4. PARENTHETICALS: Exactly 16 spaces indent from left margin, inside parentheses, max 28 characters wide (e.g. '                (Talking to himself.)' or '                (with a little chuckle)').\n" +
+          "5. SPOKEN DIALOGUE: Exactly 10 spaces indent from left margin, wrapped to ~34-36 characters wide per line (e.g. '          Excuse me sir. How can i help you?'). Form a clean spoken column under the character name.\n" +
+          "6. TRANSITIONS: Indented ~44 spaces (e.g. '                                            CUT TO:').\n" +
+          "7. END OF SCRIPT: Indented 24 spaces: '                        The END'.\n" +
+          "8. Output ONLY the plain text screenplay with exact column spaces. Do NOT use markdown code blocks, asterisks, bolding, hashes, or conversational preamble.\n\n" +
+          "CRITICAL EXAMPLE FORMAT:\n" +
+          "EXT. COFFEE PLACE\n\n" +
+          "Smrithi Aaradhya sitting at a table looking blank deeply into\n" +
+          "the sunset skies, like she is lost into a cosmic universe.\n\n" +
+          "                        WAITER\n" +
+          "          Excuse me sir. How can i help you?\n\n" +
+          "                        TARUN\n" +
+          "          Table no 18\n\n" +
+          "                        TARUN (CONT'D)\n" +
+          "                (Talking to himself.)\n" +
+          "          Right kada.\n\n" +
+          "Tarun takes out foldable blind support stick from his pocket\n" +
+          "and glassed from his shirt and wears it.\n\n" +
+          "CRITICAL COMPLETION REQUIREMENT: Adapt the ENTIRE provided story/chapter completely from beginning to climax and resolution without truncating or stopping prematurely." +
           bible,
-        input: `Adapt the complete story/chapter below into a screenplay. Ensure all key scenes and dialogue are adapted through to the end:\n\n${r.text.slice(0, 100000)}`,
+        input: `Adapt the complete story/chapter below into a screenplay strictly adhering to the exact 24-space character, 16-space parenthetical, 10-space dialogue, and 0-space action/slugline indentation layout:\n\n${r.text.slice(0, 100000)}`,
       };
     case "scenes":
       return {

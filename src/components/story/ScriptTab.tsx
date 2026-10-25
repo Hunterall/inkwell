@@ -1,10 +1,22 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Clapperboard, Download } from "lucide-react";
+import { Clapperboard, Download, FileText, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { streamWrite } from "@/lib/ai/stream-client";
-import { bibleToText, fullText, useBible, useChapters } from "./data";
+import { formatScreenplay, exportScreenplayPdf } from "@/lib/screenplay";
+import { auth } from "@/integrations/firebase/client";
+import { bibleToText, useBible, useChapters } from "./data";
 import type { Story } from "@/routes/_authenticated/stories_.$id";
 
 export function ScriptTab({
@@ -19,7 +31,18 @@ export function ScriptTab({
   const [busy, setBusy] = useState(false);
   const [progressMsg, setProgressMsg] = useState<string | null>(null);
   const [selectedChapterId, setSelectedChapterId] = useState<string>("all");
-  const scenes = (story.script || "").split("\n").filter((l) => /^(INT\.|EXT\.|INT\/EXT)/.test(l.trim()));
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+
+  // PDF Export dialog state
+  const [pdfTitle, setPdfTitle] = useState(story.title || "Untitled Screenplay");
+  const [pdfAuthor, setPdfAuthor] = useState(auth.currentUser?.displayName || "");
+  const [pdfAddress, setPdfAddress] = useState("");
+  const [pdfPhone, setPdfPhone] = useState("");
+  const [pdfEmail, setPdfEmail] = useState(auth.currentUser?.email || "");
+
+  const scenes = (story.script || "")
+    .split("\n")
+    .filter((l) => /^(INT\.|EXT\.|INT\/EXT|EXT\/INT|I\/E\.)/i.test(l.trim()));
 
   async function convertSingle(textToConvert: string, bibleText: string): Promise<string> {
     let result = "";
@@ -29,7 +52,7 @@ export function ScriptTab({
         result = chunk;
       },
     );
-    return result;
+    return formatScreenplay(result);
   }
 
   async function convert() {
@@ -46,25 +69,34 @@ export function ScriptTab({
       if (selectedChapterId === "all") {
         if (validChapters.length === 1) {
           const firstChap = validChapters[0]!;
-          // Single chapter story
           setProgressMsg("Adapting chapter to screenplay…");
+          let rawResult = "";
           await streamWrite(
             { mode: "script", text: `${firstChap.title}\n\n${firstChap.content}`, bible: bibleText },
-            (s) => update({ script: s }),
+            (s) => {
+              rawResult = s;
+              update({ script: s });
+            },
           );
+          if (rawResult) {
+            update({ script: formatScreenplay(rawResult) });
+          }
         } else {
-          // Multi-chapter story: convert sequentially so entire story is converted without truncation
           let fullScript = "";
           for (let i = 0; i < validChapters.length; i++) {
             const chap = validChapters[i]!;
-            setProgressMsg(`Adapting Chapter ${i + 1} of ${validChapters.length}: "${chap.title || `Chapter ${i + 1}`}"…`);
+            setProgressMsg(
+              `Adapting Chapter ${i + 1} of ${validChapters.length}: "${chap.title || `Chapter ${i + 1}`}"…`,
+            );
 
             const chapText = `CHAPTER ${i + 1}: ${chap.title}\n\n${chap.content}`;
             const chapScript = await convertSingle(chapText, bibleText);
 
             if (chapScript.trim()) {
               if (fullScript) {
-                fullScript += `\n\n/* ---------------------------------------- */\n/* CHAPTER ${i + 1}: ${chap.title} */\n/* ---------------------------------------- */\n\n` + chapScript.trim();
+                fullScript +=
+                  `\n\n/* ---------------------------------------- */\n/* CHAPTER ${i + 1}: ${chap.title} */\n/* ---------------------------------------- */\n\n` +
+                  chapScript.trim();
               } else {
                 fullScript = chapScript.trim();
               }
@@ -72,9 +104,8 @@ export function ScriptTab({
             }
           }
         }
-        toast.success("Complete story converted to screenplay!");
+        toast.success("Complete story converted to formatted screenplay!");
       } else {
-        // Individual chapter selected
         const chap = validChapters.find((c) => c.id === selectedChapterId);
         if (!chap) {
           toast.error("Selected chapter not found.");
@@ -100,7 +131,40 @@ export function ScriptTab({
     }
   }
 
-  function download() {
+  function handleAutoFormat() {
+    if (!story.script?.trim()) {
+      toast.error("No script content to format.");
+      return;
+    }
+    const formatted = formatScreenplay(story.script);
+    update({ script: formatted });
+    toast.success("Screenplay formatted to standard theatrical Courier layout!");
+  }
+
+  function handleExportPdf() {
+    if (!story.script?.trim()) {
+      toast.error("Screenplay is empty. Write or generate one first.");
+      return;
+    }
+    try {
+      exportScreenplayPdf({
+        title: pdfTitle || story.title || "Untitled Screenplay",
+        author: pdfAuthor || "Screenwriter",
+        script: story.script,
+        contact: {
+          address: pdfAddress.trim() || undefined,
+          phone: pdfPhone.trim() || undefined,
+          email: pdfEmail.trim() || undefined,
+        },
+      });
+      setExportModalOpen(false);
+      toast.success("Screenplay PDF downloaded successfully!");
+    } catch (err) {
+      toast.error("Failed to generate PDF: " + (err as Error).message);
+    }
+  }
+
+  function downloadFountain() {
     const blob = new Blob([story.script], { type: "text/plain" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -115,9 +179,10 @@ export function ScriptTab({
           value={story.script}
           onChange={(e) => update({ script: e.target.value })}
           placeholder="Your screenplay will appear here."
-          className="screenplay min-h-[70vh] resize-none border-none bg-transparent p-0 shadow-none focus-visible:ring-0"
+          className="screenplay min-h-[70vh] resize-none border-none bg-transparent p-0 shadow-none focus-visible:ring-0 leading-relaxed"
         />
       </div>
+
       <aside className="space-y-4">
         <div className="rounded-lg border border-sepia/20 bg-card p-4 space-y-3">
           <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block">
@@ -139,7 +204,11 @@ export function ScriptTab({
 
           <Button className="w-full" disabled={busy} onClick={convert}>
             <Clapperboard className="mr-2 h-4 w-4" />
-            {busy ? "Adapting Screenplay…" : selectedChapterId === "all" ? "Convert Whole Story" : "Adapt & Append Chapter"}
+            {busy
+              ? "Adapting Screenplay…"
+              : selectedChapterId === "all"
+                ? "Convert Whole Story"
+                : "Adapt & Append Chapter"}
           </Button>
 
           {progressMsg && (
@@ -149,10 +218,48 @@ export function ScriptTab({
           )}
         </div>
 
-        <Button variant="outline" className="w-full" disabled={!story.script} onClick={download}>
-          <Download className="mr-2 h-4 w-4" />
-          Download script
-        </Button>
+        {/* Formatting & Export Actions */}
+        <div className="rounded-lg border border-border bg-card p-4 space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Tools & Export
+          </p>
+
+          <Button
+            variant="outline"
+            className="w-full justify-start text-xs"
+            disabled={!story.script?.trim() || busy}
+            onClick={handleAutoFormat}
+          >
+            <Wand2 className="mr-2 h-3.5 w-3.5 text-sepia" />
+            Format Screenplay (Courier Layout)
+          </Button>
+
+          <Button
+            variant="outline"
+            className="w-full justify-start text-xs border-sepia/30 hover:bg-sepia/10"
+            disabled={!story.script?.trim()}
+            onClick={() => {
+              setPdfTitle(story.title || "Untitled Screenplay");
+              setPdfAuthor(auth.currentUser?.displayName || "");
+              setPdfEmail(auth.currentUser?.email || "");
+              setExportModalOpen(true);
+            }}
+          >
+            <FileText className="mr-2 h-3.5 w-3.5 text-sepia" />
+            Export Screenplay (PDF)
+          </Button>
+
+          <Button
+            variant="ghost"
+            className="w-full justify-start text-xs text-muted-foreground"
+            disabled={!story.script}
+            onClick={downloadFountain}
+          >
+            <Download className="mr-2 h-3.5 w-3.5" />
+            Download Fountain (.fountain)
+          </Button>
+        </div>
+
         <div>
           <div className="mb-2 flex items-center justify-between">
             <p className="font-mono text-xs uppercase tracking-widest text-sepia">
@@ -173,6 +280,95 @@ export function ScriptTab({
           </ol>
         </div>
       </aside>
+
+      {/* Screenplay PDF Export Dialog */}
+      <Dialog open={exportModalOpen} onOpenChange={setExportModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-sepia" />
+              Export Theatrical Screenplay PDF
+            </DialogTitle>
+            <DialogDescription>
+              Exports your script to industry-standard theatrical screenplay format with Courier 12pt,
+              exact margins, cover page, and scene numbering.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2 text-sm">
+            <div className="space-y-1">
+              <Label htmlFor="pdf-title" className="text-xs font-medium">
+                Screenplay Title
+              </Label>
+              <Input
+                id="pdf-title"
+                value={pdfTitle}
+                onChange={(e) => setPdfTitle(e.target.value)}
+                placeholder="The Blind Date"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label htmlFor="pdf-author" className="text-xs font-medium">
+                Written By (Author Name)
+              </Label>
+              <Input
+                id="pdf-author"
+                value={pdfAuthor}
+                onChange={(e) => setPdfAuthor(e.target.value)}
+                placeholder="Author Name"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label htmlFor="pdf-email" className="text-xs font-medium">
+                  Contact E-mail
+                </Label>
+                <Input
+                  id="pdf-email"
+                  value={pdfEmail}
+                  onChange={(e) => setPdfEmail(e.target.value)}
+                  placeholder="name@example.com"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="pdf-phone" className="text-xs font-medium">
+                  Phone (Optional)
+                </Label>
+                <Input
+                  id="pdf-phone"
+                  value={pdfPhone}
+                  onChange={(e) => setPdfPhone(e.target.value)}
+                  placeholder="+1 (555) 0123"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <Label htmlFor="pdf-address" className="text-xs font-medium">
+                Address / Agency (Optional)
+              </Label>
+              <Input
+                id="pdf-address"
+                value={pdfAddress}
+                onChange={(e) => setPdfAddress(e.target.value)}
+                placeholder="City, State"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setExportModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleExportPdf}>
+              <Download className="mr-2 h-4 w-4" />
+              Download PDF
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
