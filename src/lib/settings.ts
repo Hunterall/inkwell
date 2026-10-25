@@ -2,57 +2,19 @@ import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/integrations/firebase/client";
 
 export type AiSettings = {
-  /** Which text provider to use for writing */
-  textProvider: "openrouter" | "gemini";
+  /** Text provider (OpenRouter) */
+  textProvider: "openrouter";
   openRouterApiKey: string;
   openRouterModel: string;
-  /** Gemini text generation settings */
-  geminiApiKey: string;
-  geminiModel: string;
-  /** Image generation settings — Gemini, Pollinations AI, Cloudflare AI */
-  imageGeminiApiKey: string;
-  imageGeminiModel: string;
+  /** Image generation settings — Pollinations AI, Cloudflare AI */
   imagePollinationsApiKey: string;
   imagePollinationsModel: string;
   imageCloudflareAccountId: string;
   imageCloudflareApiToken: string;
   imageCloudflareModel: string;
   /** Which image provider to use */
-  imageProvider: "gemini" | "pollinations" | "cloudflare";
+  imageProvider: "pollinations" | "cloudflare";
 };
-
-export const POPULAR_GEMINI_TEXT_MODELS = [
-  {
-    id: "gemini-3.8-flash",
-    name: "Gemini 3.8 Flash",
-    tag: "Recommended / Latest",
-    description: "Google's latest flagship flash model. Blazing fast, huge context window, and exceptional prose.",
-  },
-  {
-    id: "gemini-3.8-pro",
-    name: "Gemini 3.8 Pro",
-    tag: "Premium Quality",
-    description: "Top-tier reasoning and nuanced prose, ideal for complex narratives, screenplays, and deep lore.",
-  },
-  {
-    id: "gemini-2.0-flash",
-    name: "Gemini 2.0 Flash",
-    tag: "Reliable",
-    description: "Fast and reliable for everyday drafting, rewriting, and scene breakdowns.",
-  },
-  {
-    id: "gemini-1.5-pro",
-    name: "Gemini 1.5 Pro",
-    tag: "Large Context",
-    description: "Massive 1M token context window for very long manuscripts and screenplays.",
-  },
-];
-
-export const POPULAR_GEMINI_IMAGE_MODELS = [
-  { id: "imagen-3.0-generate-002", name: "Imagen 3 (Recommended)" },
-  { id: "gemini-2.5-flash-image", name: "Gemini 2.5 Flash Image" },
-  { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash" },
-];
 
 export const POPULAR_POLLINATIONS_MODELS = [
   { id: "flux", name: "FLUX.1 Schnell (Default, Fast & High Quality)" },
@@ -69,65 +31,182 @@ export const POPULAR_CLOUDFLARE_MODELS = [
   { id: "@cf/lykon/dreamshaper-8-lcm", name: "DreamShaper 8 LCM" },
 ];
 
-export const POPULAR_MODELS = [
+export type OpenRouterModelInfo = {
+  id: string;
+  name: string;
+  tag: string;
+  category: "free" | "flagship";
+  isFree: boolean;
+  contextLength: string;
+  description: string;
+};
+
+export const POPULAR_MODELS: OpenRouterModelInfo[] = [
+  // ── 100% FREE MODELS ($0 / TOKEN) ──
   {
-    id: "anthropic/claude-3.5-sonnet",
-    name: "Claude 3.5 Sonnet",
-    tag: "Recommended for Prose",
-    description: "Exceptional literary tone, nuanced character dialogue, and vivid prose.",
+    id: "openrouter/free",
+    name: "Free Models Router",
+    tag: "100% Free • Auto-Fallback",
+    category: "free",
+    isFree: true,
+    contextLength: "200K",
+    description: "The simplest, most reliable way to write for free. OpenRouter dynamically routes to the fastest active free model.",
   },
   {
-    id: "anthropic/claude-3.7-sonnet",
-    name: "Claude 3.7 Sonnet",
-    tag: "Cutting Edge",
-    description: "Hybrid reasoning and literary excellence for complex plotting and deep narratives.",
+    id: "google/gemma-4-31b-it:free",
+    name: "Google Gemma 4 31B",
+    tag: "100% Free • Literary Choice",
+    category: "free",
+    isFree: true,
+    contextLength: "256K",
+    description: "Google DeepMind's flagship 31B dense model. Outstanding narrative voice, rich character depth, and literary prose.",
   },
   {
-    id: "openai/gpt-4o",
-    name: "GPT-4o",
-    tag: "Fast & Creative",
-    description: "Flagship versatile OpenAI model, excellent at structure and screenplay formatting.",
+    id: "nvidia/nemotron-3-ultra-550b-a55b:free",
+    name: "NVIDIA Nemotron 3 Ultra",
+    tag: "100% Free • 1M Context",
+    category: "free",
+    isFree: true,
+    contextLength: "1,000K",
+    description: "Frontier 550B reasoning and narrative model with 1 Million token context. Ideal for entire novel arcs and intricate screenplays.",
+  },
+  {
+    id: "google/gemma-4-26b-a4b-it:free",
+    name: "Google Gemma 4 26B",
+    tag: "100% Free • Fast DeepMind",
+    category: "free",
+    isFree: true,
+    contextLength: "256K",
+    description: "Fast Mixture-of-Experts model from Google DeepMind. Great for rapid brainstorming, outlines, and chapter drafts.",
+  },
+  {
+    id: "nvidia/nemotron-3-super-120b-a12b:free",
+    name: "NVIDIA Nemotron 3 Super",
+    tag: "100% Free • 120B MoE",
+    category: "free",
+    isFree: true,
+    contextLength: "262K",
+    description: "120B-parameter open hybrid MoE model from NVIDIA. High compute efficiency and consistency across scene beats.",
+  },
+  {
+    id: "nvidia/nemotron-3.5-lightning:free",
+    name: "NVIDIA Nemotron 3.5 Lightning",
+    tag: "100% Free • Ultra Fast",
+    category: "free",
+    isFree: true,
+    contextLength: "1,000K",
+    description: "Lightweight, ultra-fast generation with massive 1M context. Perfect for quick dialogue polish and scene punch-ups.",
+  },
+  {
+    id: "thinkingmachines/inkling:free",
+    name: "Thinking Machines Inkling",
+    tag: "100% Free • 975B MoE",
+    category: "free",
+    isFree: true,
+    contextLength: "1,048K",
+    description: "Massive 975B mixture-of-experts model with over 1M context. Deeply creative world-building and lore generation.",
+  },
+  {
+    id: "dots-studio/dots-3-note-preview:free",
+    name: "Dots3-Note Preview",
+    tag: "100% Free • 512K Context",
+    category: "free",
+    isFree: true,
+    contextLength: "512K",
+    description: "280B MoE model tuned for note-taking, screenplay treatments, and literary outlines.",
+  },
+
+  // ── POPULAR FLAGSHIP & ECONOMICAL MODELS (ACTIVE) ──
+  {
+    id: "deepseek/deepseek-chat",
+    name: "DeepSeek V3",
+    tag: "Ultra-Low Cost • High Quality",
+    category: "flagship",
+    isFree: false,
+    contextLength: "163K",
+    description: "Exceptional writing quality and narrative nuance at a tiny fraction of a cent per chapter.",
+  },
+  {
+    id: "deepseek/deepseek-v4.1-flash",
+    name: "DeepSeek V4.1 Flash",
+    tag: "Ultra-Fast • 1M Context",
+    category: "flagship",
+    isFree: false,
+    contextLength: "1,000K",
+    description: "Blazingly fast generation with full 1M context at minimal cost. Great for long drafts.",
   },
   {
     id: "openai/gpt-4o-mini",
     name: "GPT-4o Mini",
-    tag: "Fast & Economical",
-    description: "Very fast and budget-conscious for rapid brainstorming and outlines.",
+    tag: "Economical • Fast",
+    category: "flagship",
+    isFree: false,
+    contextLength: "128K",
+    description: "OpenAI's nimble model. Fast, dependable formatting for screenplays, outlines, and character bios.",
   },
   {
-    id: "deepseek/deepseek-chat",
-    name: "DeepSeek V3",
-    tag: "Great Value",
-    description: "Remarkably strong writing quality at an unbeatable price point.",
+    id: "openai/gpt-4o",
+    name: "GPT-4o",
+    tag: "Flagship Versatile",
+    category: "flagship",
+    isFree: false,
+    contextLength: "128K",
+    description: "OpenAI's flagship powerhouse. Superb structural adaptation, pacing, and multi-character dialogue.",
   },
   {
-    id: "deepseek/deepseek-r1",
-    name: "DeepSeek R1",
-    tag: "Reasoning",
-    description: "Deep thinking model best for resolving intricate plot twists and mysteries.",
+    id: "anthropic/claude-sonnet-4.5",
+    name: "Claude Sonnet 4.5",
+    tag: "Literary Gold Standard",
+    category: "flagship",
+    isFree: false,
+    contextLength: "1,000K",
+    description: "Anthropic's latest literary marvel. Unmatched richness in poetic imagery, interior monologue, and pacing.",
   },
   {
-    id: "google/gemini-2.0-flash-001",
-    name: "Gemini 2.0 Flash",
-    tag: "Blazing Fast",
-    description: "Instant speed with large context window for expansive story bibles.",
+    id: "anthropic/claude-haiku-4.5",
+    name: "Claude Haiku 4.5",
+    tag: "Fast Literary",
+    category: "flagship",
+    isFree: false,
+    contextLength: "200K",
+    description: "Speedy and affordable Claude model with strong narrative and dialogue instincts.",
   },
   {
     id: "meta-llama/llama-3.3-70b-instruct",
     name: "Llama 3.3 70B",
-    tag: "Open Source",
-    description: "High performance open model with high quality creative output.",
+    tag: "Open Weights Flagship",
+    category: "flagship",
+    isFree: false,
+    contextLength: "131K",
+    description: "Meta's flagship 70B open model. Robust creative writing, dramatic scenes, and plot exploration.",
+  },
+  {
+    id: "mistralai/mistral-large",
+    name: "Mistral Large",
+    tag: "Nuanced Storytelling",
+    category: "flagship",
+    isFree: false,
+    contextLength: "128K",
+    description: "Top-tier European flagship model with sophisticated pacing, prose, and multilingual storytelling.",
   },
 ];
+
+export function normalizeOpenRouterModel(model?: string): string {
+  if (!model) return "openrouter/free";
+  const trimmed = model.trim();
+  const legacyMap: Record<string, string> = {
+    "anthropic/claude-3.5-sonnet": "anthropic/claude-sonnet-4.5",
+    "anthropic/claude-3.7-sonnet": "anthropic/claude-sonnet-4.5",
+    "deepseek/deepseek-r1": "deepseek/deepseek-chat",
+    "mistralai/mistral-large-2411": "mistralai/mistral-large",
+  };
+  return legacyMap[trimmed] || trimmed;
+}
 
 export const DEFAULT_AI_SETTINGS: AiSettings = {
   textProvider: "openrouter",
   openRouterApiKey: "",
-  openRouterModel: "anthropic/claude-3.5-sonnet",
-  geminiApiKey: "",
-  geminiModel: "gemini-3.8-flash",
-  imageGeminiApiKey: "",
-  imageGeminiModel: "imagen-3.0-generate-002",
+  openRouterModel: "openrouter/free",
   imagePollinationsApiKey: "",
   imagePollinationsModel: "flux",
   imageCloudflareAccountId: "",
@@ -135,21 +214,6 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   imageCloudflareModel: "@cf/black-forest-labs/flux-1-schnell",
   imageProvider: "pollinations",
 };
-
-/**
- * Sanitizes and migrates deprecated Gemini model names (e.g. gemini-2.5-flash -> gemini-3.8-flash)
- */
-export function sanitizeGeminiModel(model?: string): string {
-  if (!model) return "gemini-3.8-flash";
-  let cleaned = model.trim().replace(/^models\//, "");
-  if (cleaned === "gemini-2.5-flash" || cleaned === "gemini-1.5-flash") {
-    return "gemini-3.8-flash";
-  }
-  if (cleaned === "gemini-2.5-pro") {
-    return "gemini-3.8-pro";
-  }
-  return cleaned || "gemini-3.8-flash";
-}
 
 const LOCAL_STORAGE_KEY = "inkwell_ai_settings_v1";
 
@@ -163,26 +227,17 @@ export function getAiSettings(): AiSettings {
     if (!raw) return DEFAULT_AI_SETTINGS;
     const parsed = JSON.parse(raw) as Partial<AiSettings>;
     return {
-      textProvider:
-        parsed.textProvider === "openrouter" || parsed.textProvider === "gemini"
-          ? parsed.textProvider
-          : DEFAULT_AI_SETTINGS.textProvider,
+      textProvider: "openrouter",
       openRouterApiKey: parsed.openRouterApiKey?.trim() ?? "",
-      openRouterModel: parsed.openRouterModel?.trim() || DEFAULT_AI_SETTINGS.openRouterModel,
-      geminiApiKey: parsed.geminiApiKey?.trim() ?? "",
-      geminiModel: sanitizeGeminiModel(parsed.geminiModel),
-      imageGeminiApiKey: parsed.imageGeminiApiKey?.trim() ?? "",
-      imageGeminiModel: parsed.imageGeminiModel?.trim() || DEFAULT_AI_SETTINGS.imageGeminiModel,
+      openRouterModel: normalizeOpenRouterModel(parsed.openRouterModel),
       imagePollinationsApiKey: parsed.imagePollinationsApiKey?.trim() ?? "",
       imagePollinationsModel: parsed.imagePollinationsModel?.trim() || DEFAULT_AI_SETTINGS.imagePollinationsModel,
       imageCloudflareAccountId: parsed.imageCloudflareAccountId?.trim() ?? "",
       imageCloudflareApiToken: parsed.imageCloudflareApiToken?.trim() ?? "",
       imageCloudflareModel: parsed.imageCloudflareModel?.trim() || DEFAULT_AI_SETTINGS.imageCloudflareModel,
       imageProvider:
-        parsed.imageProvider === "gemini" ||
-        parsed.imageProvider === "pollinations" ||
         parsed.imageProvider === "cloudflare"
-          ? parsed.imageProvider
+          ? "cloudflare"
           : DEFAULT_AI_SETTINGS.imageProvider,
     };
   } catch {
@@ -199,50 +254,35 @@ export async function saveAiSettings(
 ): Promise<AiSettings> {
   const current = getAiSettings();
   const updated: AiSettings = {
-    textProvider: settings.textProvider ?? current.textProvider,
+    textProvider: "openrouter",
     openRouterApiKey:
       settings.openRouterApiKey !== undefined
-        ? settings.openRouterApiKey.trim()
+        ? (settings.openRouterApiKey || "").trim()
         : current.openRouterApiKey,
-    openRouterModel:
+    openRouterModel: normalizeOpenRouterModel(
       settings.openRouterModel !== undefined
-        ? settings.openRouterModel.trim()
+        ? (settings.openRouterModel || "").trim()
         : current.openRouterModel,
-    geminiApiKey:
-      settings.geminiApiKey !== undefined
-        ? settings.geminiApiKey.trim()
-        : current.geminiApiKey,
-    geminiModel:
-      settings.geminiModel !== undefined
-        ? sanitizeGeminiModel(settings.geminiModel)
-        : current.geminiModel,
-    imageGeminiApiKey:
-      settings.imageGeminiApiKey !== undefined
-        ? settings.imageGeminiApiKey.trim()
-        : current.imageGeminiApiKey,
-    imageGeminiModel:
-      settings.imageGeminiModel !== undefined
-        ? settings.imageGeminiModel.trim()
-        : current.imageGeminiModel,
+    ),
     imagePollinationsApiKey:
       settings.imagePollinationsApiKey !== undefined
-        ? settings.imagePollinationsApiKey.trim()
+        ? (settings.imagePollinationsApiKey || "").trim()
         : current.imagePollinationsApiKey,
     imagePollinationsModel:
       settings.imagePollinationsModel !== undefined
-        ? settings.imagePollinationsModel.trim()
+        ? (settings.imagePollinationsModel || "").trim() || DEFAULT_AI_SETTINGS.imagePollinationsModel
         : current.imagePollinationsModel,
     imageCloudflareAccountId:
       settings.imageCloudflareAccountId !== undefined
-        ? settings.imageCloudflareAccountId.trim()
+        ? (settings.imageCloudflareAccountId || "").trim()
         : current.imageCloudflareAccountId,
     imageCloudflareApiToken:
       settings.imageCloudflareApiToken !== undefined
-        ? settings.imageCloudflareApiToken.trim()
+        ? (settings.imageCloudflareApiToken || "").trim()
         : current.imageCloudflareApiToken,
     imageCloudflareModel:
       settings.imageCloudflareModel !== undefined
-        ? settings.imageCloudflareModel.trim()
+        ? (settings.imageCloudflareModel || "").trim() || DEFAULT_AI_SETTINGS.imageCloudflareModel
         : current.imageCloudflareModel,
     imageProvider: settings.imageProvider ?? current.imageProvider,
   };
@@ -281,18 +321,9 @@ export async function loadAiSettings(userId: string): Promise<AiSettings> {
     if (snap.exists()) {
       const data = snap.data() as Partial<AiSettings>;
       const merged: AiSettings = {
-        textProvider:
-          data.textProvider === "openrouter" || data.textProvider === "gemini"
-            ? data.textProvider
-            : local.textProvider,
+        textProvider: "openrouter",
         openRouterApiKey: data.openRouterApiKey?.trim() || local.openRouterApiKey || "",
-        openRouterModel:
-          data.openRouterModel?.trim() || local.openRouterModel || DEFAULT_AI_SETTINGS.openRouterModel,
-        geminiApiKey: data.geminiApiKey?.trim() || local.geminiApiKey || "",
-        geminiModel: sanitizeGeminiModel(data.geminiModel || local.geminiModel),
-        imageGeminiApiKey: data.imageGeminiApiKey?.trim() || local.imageGeminiApiKey || "",
-        imageGeminiModel:
-          data.imageGeminiModel?.trim() || local.imageGeminiModel || DEFAULT_AI_SETTINGS.imageGeminiModel,
+        openRouterModel: normalizeOpenRouterModel(data.openRouterModel || local.openRouterModel),
         imagePollinationsApiKey:
           data.imagePollinationsApiKey?.trim() || local.imagePollinationsApiKey || "",
         imagePollinationsModel:
@@ -304,9 +335,7 @@ export async function loadAiSettings(userId: string): Promise<AiSettings> {
         imageCloudflareModel:
           data.imageCloudflareModel?.trim() || local.imageCloudflareModel || DEFAULT_AI_SETTINGS.imageCloudflareModel,
         imageProvider:
-          data.imageProvider === "gemini" ||
-          data.imageProvider === "pollinations" ||
-          data.imageProvider === "cloudflare"
+          data.imageProvider === "cloudflare" || data.imageProvider === "pollinations"
             ? data.imageProvider
             : local.imageProvider,
       };
@@ -373,46 +402,13 @@ export async function verifyOpenRouterKey(apiKey: string): Promise<{
       isFreeTier: json.data?.is_free_tier,
     };
   } catch (e) {
+    const rawMsg = (e as Error).message || "Failed to connect to OpenRouter.";
+    const error = /Failed to fetch/i.test(rawMsg)
+      ? "Unable to reach OpenRouter (Failed to fetch). Please check your internet connection or disable ad-blockers for openrouter.ai."
+      : rawMsg;
     return {
       valid: false,
-      error: (e as Error).message || "Failed to connect to OpenRouter.",
-    };
-  }
-}
-
-/**
- * Verifies a Gemini API key by making a lightweight models.list call
- */
-export async function verifyGeminiKey(apiKey: string): Promise<{
-  valid: boolean;
-  error?: string | undefined;
-}> {
-  const cleanKey = apiKey.trim();
-  if (!cleanKey) {
-    return { valid: false, error: "Please enter a Gemini API key." };
-  }
-
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models?pageSize=1&key=${encodeURIComponent(cleanKey)}`,
-    );
-
-    if (!res.ok) {
-      let errorMsg = `Invalid API key (HTTP ${res.status})`;
-      try {
-        const j = await res.json();
-        errorMsg = (j as any)?.error?.message || errorMsg;
-      } catch {
-        /* ignore */
-      }
-      return { valid: false, error: errorMsg };
-    }
-
-    return { valid: true };
-  } catch (e) {
-    return {
-      valid: false,
-      error: (e as Error).message || "Failed to connect to Google Gemini.",
+      error,
     };
   }
 }

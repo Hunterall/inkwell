@@ -12,7 +12,6 @@ import { useEffect, type ReactNode } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 
 import appCss from "../styles.css?url";
-import { reportLovableError } from "../lib/lovable-error-reporting";
 import { auth } from "@/integrations/firebase/client";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -37,11 +36,8 @@ function NotFoundComponent() {
 }
 
 function ErrorComponent({ error, reset }: ErrorComponentProps) {
-  console.error(error);
+  console.error("Runtime error caught in root boundary:", error);
   const router = useRouter();
-  useEffect(() => {
-    reportLovableError(error, { boundary: "tanstack_root_error_component" });
-  }, [error]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">

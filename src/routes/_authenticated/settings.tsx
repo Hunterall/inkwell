@@ -4,7 +4,6 @@ import { toast } from "sonner";
 import {
   ArrowLeft,
   Key,
-  Sparkles,
   ExternalLink,
   CheckCircle2,
   XCircle,
@@ -13,7 +12,9 @@ import {
   Save,
   HelpCircle,
   ImageIcon,
-  Copy,
+  ShieldCheck,
+  Lock,
+  Sparkles,
 } from "lucide-react";
 import { auth } from "@/integrations/firebase/client";
 import { Button } from "@/components/ui/button";
@@ -24,10 +25,7 @@ import {
   saveAiSettings,
   loadAiSettings,
   verifyOpenRouterKey,
-  verifyGeminiKey,
   POPULAR_MODELS,
-  POPULAR_GEMINI_TEXT_MODELS,
-  POPULAR_GEMINI_IMAGE_MODELS,
   POPULAR_POLLINATIONS_MODELS,
   POPULAR_CLOUDFLARE_MODELS,
   type AiSettings,
@@ -45,7 +43,7 @@ export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({
     meta: [
       { title: "Settings — Inkwell" },
-      { name: "description", content: "Configure your AI text and image generation providers and API keys." },
+      { name: "description", content: "Configure your OpenRouter, Pollinations, and Cloudflare credentials." },
     ],
   }),
   component: SettingsPage,
@@ -57,14 +55,11 @@ function SettingsPage() {
 
   const [settings, setSettings] = useState<AiSettings>(getAiSettings());
   const [showKey, setShowKey] = useState(false);
-  const [showGeminiTextKey, setShowGeminiTextKey] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [testingGeminiText, setTestingGeminiText] = useState(false);
   const [saving, setSaving] = useState(false);
   const [customModel, setCustomModel] = useState("");
   const [isCustom, setIsCustom] = useState(false);
-  const [customGeminiModel, setCustomGeminiModel] = useState("");
-  const [isCustomGemini, setIsCustomGemini] = useState(false);
+  const [modelCategory, setModelCategory] = useState<"all" | "free" | "flagship">("all");
 
   const [testResult, setTestResult] = useState<{
     tested: boolean;
@@ -75,23 +70,10 @@ function SettingsPage() {
     error?: string | undefined;
   } | null>(null);
 
-  const [geminiTextTestResult, setGeminiTextTestResult] = useState<{
-    tested: boolean;
-    valid?: boolean | undefined;
-    error?: string | undefined;
-  } | null>(null);
-
   // Image generation state
   const [showImageKeys, setShowImageKeys] = useState(true);
-  const [showGeminiKey, setShowGeminiKey] = useState(false);
   const [showPollinationsKey, setShowPollinationsKey] = useState(false);
   const [showCloudflareToken, setShowCloudflareToken] = useState(false);
-  const [testingGeminiImage, setTestingGeminiImage] = useState(false);
-  const [geminiImageTestResult, setGeminiImageTestResult] = useState<{
-    tested: boolean;
-    valid?: boolean | undefined;
-    error?: string | undefined;
-  } | null>(null);
 
   useEffect(() => {
     if (!uid) return;
@@ -102,23 +84,19 @@ function SettingsPage() {
         setIsCustom(true);
         setCustomModel(loaded.openRouterModel);
       }
-      const isKnownGemini = POPULAR_GEMINI_TEXT_MODELS.some((m) => m.id === loaded.geminiModel);
-      if (!isKnownGemini && loaded.geminiModel) {
-        setIsCustomGemini(true);
-        setCustomGeminiModel(loaded.geminiModel);
-      }
     });
   }, [uid]);
 
   async function handleTestOpenRouterKey() {
-    if (!settings.openRouterApiKey.trim()) {
+    const key = (settings.openRouterApiKey || "").trim();
+    if (!key) {
       toast.error("Please enter an OpenRouter API key first.");
       return;
     }
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await verifyOpenRouterKey(settings.openRouterApiKey);
+      const res = await verifyOpenRouterKey(key);
       setTestResult({
         tested: true,
         valid: res.valid,
@@ -139,90 +117,28 @@ function SettingsPage() {
     }
   }
 
-  async function handleTestGeminiTextKey() {
-    if (!settings.geminiApiKey.trim()) {
-      toast.error("Please enter a Gemini API key first.");
-      return;
-    }
-    setTestingGeminiText(true);
-    setGeminiTextTestResult(null);
-    try {
-      const res = await verifyGeminiKey(settings.geminiApiKey);
-      setGeminiTextTestResult({
-        tested: true,
-        valid: res.valid,
-        error: res.error,
-      });
-      if (res.valid) {
-        toast.success("Google Gemini API key is valid and connected!");
-      } else {
-        toast.error(res.error || "Invalid Gemini API key");
-      }
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setTestingGeminiText(false);
-    }
-  }
-
-  async function handleTestGeminiImageKey() {
-    if (!settings.imageGeminiApiKey.trim()) {
-      toast.error("Please enter a Gemini API key for image generation first.");
-      return;
-    }
-    setTestingGeminiImage(true);
-    setGeminiImageTestResult(null);
-    try {
-      const res = await verifyGeminiKey(settings.imageGeminiApiKey);
-      setGeminiImageTestResult({
-        tested: true,
-        valid: res.valid,
-        error: res.error,
-      });
-      if (res.valid) {
-        toast.success("Gemini image API key is valid and connected!");
-      } else {
-        toast.error(res.error || "Invalid Gemini API key");
-      }
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setTestingGeminiImage(false);
-    }
-  }
-
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
-      const selectedOpenRouterModel = isCustom ? customModel.trim() : settings.openRouterModel;
-      const selectedGeminiModel = isCustomGemini ? customGeminiModel.trim() : settings.geminiModel;
+      const selectedOpenRouterModel = isCustom ? customModel.trim() : (settings.openRouterModel || "").trim();
 
-      if (settings.textProvider === "openrouter" && !selectedOpenRouterModel) {
+      if (!selectedOpenRouterModel) {
         toast.error("Please select or enter an OpenRouter AI model.");
-        setSaving(false);
-        return;
-      }
-      if (settings.textProvider === "gemini" && !selectedGeminiModel) {
-        toast.error("Please select or enter a Gemini AI model.");
         setSaving(false);
         return;
       }
 
       await saveAiSettings(
         {
-          textProvider: settings.textProvider,
-          openRouterApiKey: settings.openRouterApiKey.trim(),
+          textProvider: "openrouter",
+          openRouterApiKey: (settings.openRouterApiKey || "").trim(),
           openRouterModel: selectedOpenRouterModel,
-          geminiApiKey: settings.geminiApiKey.trim(),
-          geminiModel: selectedGeminiModel,
-          imageGeminiApiKey: settings.imageGeminiApiKey.trim(),
-          imageGeminiModel: settings.imageGeminiModel.trim(),
-          imagePollinationsApiKey: settings.imagePollinationsApiKey.trim(),
-          imagePollinationsModel: settings.imagePollinationsModel.trim(),
-          imageCloudflareAccountId: settings.imageCloudflareAccountId.trim(),
-          imageCloudflareApiToken: settings.imageCloudflareApiToken.trim(),
-          imageCloudflareModel: settings.imageCloudflareModel.trim(),
+          imagePollinationsApiKey: (settings.imagePollinationsApiKey || "").trim(),
+          imagePollinationsModel: (settings.imagePollinationsModel || "").trim(),
+          imageCloudflareAccountId: (settings.imageCloudflareAccountId || "").trim(),
+          imageCloudflareApiToken: (settings.imageCloudflareApiToken || "").trim(),
+          imageCloudflareModel: (settings.imageCloudflareModel || "").trim(),
           imageProvider: settings.imageProvider,
         },
         uid,
@@ -258,265 +174,34 @@ function SettingsPage() {
       <div className="mt-10">
         <h1 className="text-4xl font-extrabold">AI Provider & Settings</h1>
         <p className="mt-2 font-serif text-lg text-muted-foreground">
-          Configure your Google Gemini or OpenRouter credentials for intelligent writing assistance,
-          story drafting, and storyboard illustration.
+          Configure your OpenRouter credentials for intelligent writing assistance,
+          and Pollinations or Cloudflare for storyboard illustration.
         </p>
 
+        {/* Strict Security & Privacy Guarantee */}
+        <div className="mt-6 rounded-lg border border-primary/25 bg-primary/5 p-4 text-sm space-y-2">
+          <div className="flex items-center gap-2 font-semibold text-foreground">
+            <ShieldCheck className="h-5 w-5 text-primary" />
+            <span>Strict Privacy & Zero Data Retention Enforced</span>
+          </div>
+          <ul className="text-xs text-muted-foreground list-disc list-inside space-y-1.5 leading-relaxed">
+            <li>
+              <strong className="text-foreground">Zero AI Training & Retention:</strong> All OpenRouter text requests enforce <code className="bg-background px-1 py-0.5 rounded border text-[11px]">provider: &#123; data_collection: "deny" &#125;</code>, ensuring AI model providers are legally and technically prohibited from retaining or training on your creative writing.
+            </li>
+            <li>
+              <strong className="text-foreground">Storyboard Privacy:</strong> Pollinations AI frame generation uses <code className="bg-background px-1 py-0.5 rounded border text-[11px]">nofeed=true</code> and <code className="bg-background px-1 py-0.5 rounded border text-[11px]">private=true</code> so generated images and scene prompts never appear on public feeds.
+            </li>
+            <li>
+              <strong className="text-foreground">Isolated Key Storage:</strong> Your API keys and story manuscripts are strictly isolated by Firestore row-level security rules matching your user ID and are never exposed to third parties.
+            </li>
+          </ul>
+        </div>
+
         <form onSubmit={handleSave} className="mt-8 space-y-8">
-          {/* Active Text Generation Provider Toggle */}
-          <div className="page rounded-lg p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-semibold">Writing Assistant Provider</h2>
-                <p className="text-xs text-muted-foreground">
-                  Select which provider powers story drafting, rewriting, and scene breakdowns
-                </p>
-              </div>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2 pt-1">
-              {/* Gemini Button */}
-              <button
-                type="button"
-                onClick={() => setSettings({ ...settings, textProvider: "gemini" })}
-                className={`text-left p-4 rounded-md border transition-all ${
-                  settings.textProvider === "gemini"
-                    ? "border-primary bg-primary/5 ring-2 ring-primary"
-                    : "border-border hover:border-sepia/50 bg-background/50"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-sm">Google Gemini</span>
-                  <span
-                    className={`font-mono text-[10px] px-2 py-0.5 rounded-full ${
-                      settings.textProvider === "gemini"
-                        ? "bg-primary text-primary-foreground font-semibold"
-                        : "bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    {settings.textProvider === "gemini" ? "Active Provider" : "Click to select"}
-                  </span>
-                </div>
-                <p className="mt-1.5 text-xs text-muted-foreground">
-                  Direct Google API with Gemini 2.5 Flash & Pro. Extremely fast, generous free tier, 1M+ token context.
-                </p>
-              </button>
-
-              {/* OpenRouter Button */}
-              <button
-                type="button"
-                onClick={() => setSettings({ ...settings, textProvider: "openrouter" })}
-                className={`text-left p-4 rounded-md border transition-all ${
-                  settings.textProvider === "openrouter"
-                    ? "border-primary bg-primary/5 ring-2 ring-primary"
-                    : "border-border hover:border-sepia/50 bg-background/50"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-sm">OpenRouter</span>
-                  <span
-                    className={`font-mono text-[10px] px-2 py-0.5 rounded-full ${
-                      settings.textProvider === "openrouter"
-                        ? "bg-primary text-primary-foreground font-semibold"
-                        : "bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    {settings.textProvider === "openrouter" ? "Active Provider" : "Click to select"}
-                  </span>
-                </div>
-                <p className="mt-1.5 text-xs text-muted-foreground">
-                  Access 100+ models including Claude 3.5 Sonnet, GPT-4o, and DeepSeek R1 with a single key.
-                </p>
-              </button>
-            </div>
-          </div>
-
           {/* ═══════════════════════════════════════════════════════════════ */}
-          {/* SECTION 1: GOOGLE GEMINI TEXT GENERATION                        */}
+          {/* SECTION 1: OPENROUTER TEXT GENERATION                           */}
           {/* ═══════════════════════════════════════════════════════════════ */}
-          <div
-            className={`page rounded-lg p-6 space-y-5 border transition-all ${
-              settings.textProvider === "gemini" ? "border-primary/40 ring-1 ring-primary/20" : "opacity-90"
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-md bg-sepia/15 text-sepia">
-                  <Sparkles className="h-5 w-5" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-xl font-semibold">Google Gemini (Writing)</h2>
-                    {settings.textProvider === "gemini" && (
-                      <span className="bg-primary/10 text-primary text-[10px] font-mono px-2 py-0.5 rounded-full font-semibold">
-                        ACTIVE FOR WRITING
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Powers script generation, character bibles, scene suggestions, and outline drafting
-                  </p>
-                </div>
-              </div>
-              <a
-                href="https://aistudio.google.com/app/apikey"
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center text-xs text-sepia hover:underline"
-              >
-                Get a free key at Google AI Studio
-                <ExternalLink className="ml-1 h-3.5 w-3.5" />
-              </a>
-            </div>
-
-            {/* Gemini API Key */}
-            <div className="space-y-2">
-              <Label htmlFor="geminiApiKey">Gemini API Key</Label>
-              <div className="relative flex items-center">
-                <Input
-                  id="geminiApiKey"
-                  type={showGeminiTextKey ? "text" : "password"}
-                  placeholder="AIzaSy..."
-                  className="pr-24 font-mono text-sm"
-                  value={settings.geminiApiKey}
-                  onChange={(e) => {
-                    setSettings({ ...settings, geminiApiKey: e.target.value });
-                    setGeminiTextTestResult(null);
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowGeminiTextKey(!showGeminiTextKey)}
-                  className="absolute right-3 text-muted-foreground hover:text-foreground"
-                  aria-label={showGeminiTextKey ? "Hide key" : "Show key"}
-                >
-                  {showGeminiTextKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-
-            {/* Test Gemini Key & Copy Options */}
-            <div className="flex flex-wrap items-center gap-3 pt-1">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={testingGeminiText || !settings.geminiApiKey.trim()}
-                onClick={handleTestGeminiTextKey}
-              >
-                {testingGeminiText ? "Testing Gemini…" : "Test Gemini Key"}
-              </Button>
-
-              {settings.geminiApiKey.trim() && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="text-xs text-muted-foreground hover:text-foreground"
-                  onClick={() => {
-                    setSettings({ ...settings, imageGeminiApiKey: settings.geminiApiKey.trim() });
-                    toast.success("Copied Gemini API key to Image Generation!");
-                  }}
-                >
-                  <Copy className="mr-1.5 h-3.5 w-3.5" />
-                  Use same key for Image Generation
-                </Button>
-              )}
-
-              {geminiTextTestResult && geminiTextTestResult.valid && (
-                <div className="flex items-center text-xs text-green-700 bg-green-50 px-3 py-1.5 rounded-md border border-green-200">
-                  <CheckCircle2 className="mr-1.5 h-4 w-4 text-green-600" />
-                  <span>Google Gemini API key is valid and connected!</span>
-                </div>
-              )}
-
-              {geminiTextTestResult && !geminiTextTestResult.valid && (
-                <div className="flex items-center text-xs text-destructive bg-destructive/10 px-3 py-1.5 rounded-md border border-destructive/20">
-                  <XCircle className="mr-1.5 h-4 w-4" />
-                  <span>{geminiTextTestResult.error || "Invalid Gemini API key"}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Gemini Model Selection */}
-            <div className="space-y-3 pt-2 border-t border-border">
-              <Label className="text-sm font-semibold">Gemini Writing Model</Label>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {POPULAR_GEMINI_TEXT_MODELS.map((m) => {
-                  const isSelected = !isCustomGemini && settings.geminiModel === m.id;
-                  return (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => {
-                        setIsCustomGemini(false);
-                        setSettings({ ...settings, geminiModel: m.id });
-                      }}
-                      className={`text-left p-3.5 rounded-md border transition-all ${
-                        isSelected
-                          ? "border-primary bg-primary/5 ring-1 ring-primary"
-                          : "border-border hover:border-sepia/50 bg-background/50"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-sm">{m.name}</span>
-                        <span className="font-mono text-[10px] px-2 py-0.5 rounded-full bg-sepia/10 text-sepia">
-                          {m.tag}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
-                        {m.description}
-                      </p>
-                      <p className="mt-1.5 font-mono text-[11px] text-muted-foreground/80">
-                        {m.id}
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Custom Gemini Model Toggle */}
-              <div className="pt-2">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="customGeminiModelToggle"
-                    checked={isCustomGemini}
-                    onChange={(e) => {
-                      setIsCustomGemini(e.target.checked);
-                      if (e.target.checked && !customGeminiModel) {
-                        setCustomGeminiModel(settings.geminiModel);
-                      }
-                    }}
-                    className="rounded border-border"
-                  />
-                  <Label htmlFor="customGeminiModelToggle" className="cursor-pointer text-xs">
-                    Use custom Gemini model ID
-                  </Label>
-                </div>
-
-                {isCustomGemini && (
-                  <div className="mt-2 space-y-1">
-                    <Input
-                      placeholder="e.g. gemini-3.8-flash or gemini-3.8-pro"
-                      value={customGeminiModel}
-                      onChange={(e) => setCustomGeminiModel(e.target.value)}
-                      className="font-mono text-sm"
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* ═══════════════════════════════════════════════════════════════ */}
-          {/* SECTION 2: OPENROUTER TEXT GENERATION                           */}
-          {/* ═══════════════════════════════════════════════════════════════ */}
-          <div
-            className={`page rounded-lg p-6 space-y-5 border transition-all ${
-              settings.textProvider === "openrouter" ? "border-primary/40 ring-1 ring-primary/20" : "opacity-90"
-            }`}
-          >
+          <div className="page rounded-lg p-6 space-y-5 border border-primary/40 ring-1 ring-primary/20">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="flex h-9 w-9 items-center justify-center rounded-md bg-sepia/15 text-sepia">
@@ -525,11 +210,9 @@ function SettingsPage() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h2 className="text-xl font-semibold">OpenRouter (Writing)</h2>
-                    {settings.textProvider === "openrouter" && (
-                      <span className="bg-primary/10 text-primary text-[10px] font-mono px-2 py-0.5 rounded-full font-semibold">
-                        ACTIVE FOR WRITING
-                      </span>
-                    )}
+                    <span className="bg-primary/10 text-primary text-[10px] font-mono px-2 py-0.5 rounded-full font-semibold">
+                      ACTIVE FOR WRITING
+                    </span>
                   </div>
                   <p className="text-xs text-muted-foreground">
                     Connect to Claude 3.5 Sonnet, GPT-4o, and DeepSeek via OpenRouter
@@ -578,7 +261,7 @@ function SettingsPage() {
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={testing || !settings.openRouterApiKey.trim()}
+                disabled={testing || !settings.openRouterApiKey?.trim()}
                 onClick={handleTestOpenRouterKey}
               >
                 {testing ? "Testing connection…" : "Test OpenRouter Key"}
@@ -604,11 +287,59 @@ function SettingsPage() {
               )}
             </div>
 
-            {/* Models Grid */}
-            <div className="space-y-3 pt-2 border-t border-border">
-              <Label className="text-sm font-semibold">OpenRouter Writing Model</Label>
+            {/* Models Grid & Categorization */}
+            <div className="space-y-4 pt-3 border-t border-border">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <Label className="text-sm font-semibold">OpenRouter Writing Model</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Select from top verified 100% free models ($0/token) or premium creative flagships.
+                  </p>
+                </div>
+
+                {/* Filter Tabs */}
+                <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/60 border text-xs self-start sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => setModelCategory("all")}
+                    className={`px-2.5 py-1 rounded-md font-medium transition-all ${
+                      modelCategory === "all"
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    All ({POPULAR_MODELS.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setModelCategory("free")}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-medium transition-all ${
+                      modelCategory === "free"
+                        ? "bg-emerald-600 text-white shadow-sm"
+                        : "text-emerald-700 dark:text-emerald-400 hover:text-foreground"
+                    }`}
+                  >
+                    <Sparkles className="h-3 w-3" />
+                    Free Models ({POPULAR_MODELS.filter((m) => m.isFree).length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setModelCategory("flagship")}
+                    className={`px-2.5 py-1 rounded-md font-medium transition-all ${
+                      modelCategory === "flagship"
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Flagship ({POPULAR_MODELS.filter((m) => !m.isFree).length})
+                  </button>
+                </div>
+              </div>
+
               <div className="grid gap-3 sm:grid-cols-2">
-                {POPULAR_MODELS.map((m) => {
+                {POPULAR_MODELS.filter((m) =>
+                  modelCategory === "all" ? true : m.category === modelCategory,
+                ).map((m) => {
                   const isSelected = !isCustom && settings.openRouterModel === m.id;
                   return (
                     <button
@@ -618,22 +349,37 @@ function SettingsPage() {
                         setIsCustom(false);
                         setSettings({ ...settings, openRouterModel: m.id });
                       }}
-                      className={`text-left p-3.5 rounded-md border transition-all ${
+                      className={`relative text-left p-3.5 rounded-md border transition-all ${
                         isSelected
-                          ? "border-primary bg-primary/5 ring-1 ring-primary"
+                          ? "border-primary bg-primary/10 ring-2 ring-primary shadow-sm"
                           : "border-border hover:border-sepia/50 bg-background/50"
                       }`}
                     >
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-sm">{m.name}</span>
-                        <span className="font-mono text-[10px] px-2 py-0.5 rounded-full bg-sepia/10 text-sepia">
-                          {m.tag}
-                        </span>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-semibold text-sm">{m.name}</span>
+                            {m.isFree && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                                <Sparkles className="h-2.5 w-2.5" />
+                                FREE
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
+                            {m.description}
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                          <span className="font-mono text-[10px] px-2 py-0.5 rounded-full bg-sepia/10 text-sepia font-semibold">
+                            {m.tag}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground font-mono">
+                            {m.contextLength} ctx
+                          </span>
+                        </div>
                       </div>
-                      <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
-                        {m.description}
-                      </p>
-                      <p className="mt-1.5 font-mono text-[11px] text-muted-foreground/80">
+                      <p className="mt-2 font-mono text-[11px] text-muted-foreground/80 break-all">
                         {m.id}
                       </p>
                     </button>
@@ -664,13 +410,22 @@ function SettingsPage() {
                 {isCustom && (
                   <div className="mt-2 space-y-1">
                     <Input
-                      placeholder="e.g. meta-llama/llama-3.1-405b-instruct or mistralai/mistral-large"
+                      placeholder="e.g. google/gemma-4-31b-it:free or deepseek/deepseek-chat"
                       value={customModel}
                       onChange={(e) => setCustomModel(e.target.value)}
                       className="font-mono text-sm"
                     />
                     <p className="text-xs text-muted-foreground">
-                      Enter any valid model slug available in the OpenRouter models catalog.
+                      Enter any model ID from the OpenRouter catalog.{" "}
+                      <a
+                        href="https://openrouter.ai/models?max_price=0"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-sepia underline inline-flex items-center"
+                      >
+                        Browse all free models on OpenRouter
+                        <ExternalLink className="ml-0.5 h-3 w-3" />
+                      </a>
                     </p>
                   </div>
                 )}
@@ -679,7 +434,7 @@ function SettingsPage() {
           </div>
 
           {/* ═══════════════════════════════════════════════════════════════ */}
-          {/* SECTION 3: IMAGE GENERATION PROVIDERS (GEMINI / POLLINATIONS / CF) */}
+          {/* SECTION 2: IMAGE GENERATION PROVIDERS (POLLINATIONS / CF)       */}
           {/* ═══════════════════════════════════════════════════════════════ */}
           <div className="page rounded-lg p-6 space-y-5">
             <div className="flex items-center justify-between">
@@ -690,7 +445,7 @@ function SettingsPage() {
                 <div>
                   <h2 className="text-xl font-semibold">Image Generation Providers</h2>
                   <p className="text-xs text-muted-foreground">
-                    Configure API keys for storyboard illustration. Google Gemini / Imagen 3, Pollinations, and Cloudflare supported.
+                    Configure API keys for storyboard illustration. Pollinations AI and Cloudflare Workers AI supported.
                   </p>
                 </div>
               </div>
@@ -716,141 +471,10 @@ function SettingsPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="gemini">Google Gemini / Imagen 3 (API Key)</SelectItem>
                       <SelectItem value="pollinations">Pollinations AI URL Generator (Fast, Free or Keyed)</SelectItem>
                       <SelectItem value="cloudflare">Cloudflare Workers AI (Account ID + Token)</SelectItem>
                     </SelectContent>
                   </Select>
-                </div>
-
-                {/* Gemini / Imagen 3 */}
-                <div className="border rounded-md p-4 space-y-3 bg-background/50">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold">Google Gemini / Imagen 3</span>
-                        <span
-                          className={`text-[10px] font-mono px-2 py-0.5 rounded-full ${
-                            settings.imageProvider === "gemini"
-                              ? "bg-primary text-primary-foreground font-semibold"
-                              : "bg-muted text-muted-foreground"
-                          }`}
-                        >
-                          {settings.imageProvider === "gemini" ? "Active Image Provider" : "Inactive"}
-                        </span>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Generate high-resolution illustrations using Google's Imagen 3 or Gemini multimodal models.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="imageGeminiKey">Gemini Image API Key</Label>
-                      {settings.geminiApiKey.trim() && settings.geminiApiKey !== settings.imageGeminiApiKey && (
-                        <button
-                          type="button"
-                          className="text-[11px] text-sepia hover:underline flex items-center gap-1"
-                          onClick={() => {
-                            setSettings({ ...settings, imageGeminiApiKey: settings.geminiApiKey.trim() });
-                            toast.success("Synced Gemini key from writing settings!");
-                          }}
-                        >
-                          <Copy className="h-3 w-3" />
-                          Copy from Writing Key
-                        </button>
-                      )}
-                    </div>
-                    <div className="relative flex items-center">
-                      <Input
-                        id="imageGeminiKey"
-                        type={showGeminiKey ? "text" : "password"}
-                        placeholder="AIzaSy..."
-                        className="pr-24 font-mono text-sm"
-                        value={settings.imageGeminiApiKey}
-                        onChange={(e) => {
-                          setSettings({ ...settings, imageGeminiApiKey: e.target.value });
-                          setGeminiImageTestResult(null);
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowGeminiKey(!showGeminiKey)}
-                        className="absolute right-3 text-muted-foreground hover:text-foreground"
-                        aria-label={showGeminiKey ? "Hide key" : "Show key"}
-                      >
-                        {showGeminiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Get key at <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="underline">aistudio.google.com</a>
-                    </p>
-                  </div>
-
-                  {/* Test Image Gemini Key */}
-                  <div className="flex flex-wrap items-center gap-3 pt-1">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={testingGeminiImage || !settings.imageGeminiApiKey.trim()}
-                      onClick={handleTestGeminiImageKey}
-                    >
-                      {testingGeminiImage ? "Testing Gemini Key…" : "Test Gemini Key"}
-                    </Button>
-
-                    {geminiImageTestResult && geminiImageTestResult.valid && (
-                      <div className="flex items-center text-xs text-green-700 bg-green-50 px-3 py-1.5 rounded-md border border-green-200">
-                        <CheckCircle2 className="mr-1.5 h-4 w-4 text-green-600" />
-                        <span>Gemini API key is valid!</span>
-                      </div>
-                    )}
-
-                    {geminiImageTestResult && !geminiImageTestResult.valid && (
-                      <div className="flex items-center text-xs text-destructive bg-destructive/10 px-3 py-1.5 rounded-md border border-destructive/20">
-                        <XCircle className="mr-1.5 h-4 w-4" />
-                        <span>{geminiImageTestResult.error || "Invalid Gemini API key"}</span>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="space-y-1">
-                    <Label htmlFor="imageGeminiModel">Model</Label>
-                    <div className="space-y-2">
-                      <Select
-                        value={
-                          POPULAR_GEMINI_IMAGE_MODELS.some((m) => m.id === settings.imageGeminiModel)
-                            ? settings.imageGeminiModel
-                            : "custom"
-                        }
-                        onValueChange={(val) => {
-                          if (val !== "custom") {
-                            setSettings({ ...settings, imageGeminiModel: val });
-                          }
-                        }}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select a Gemini model" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {POPULAR_GEMINI_IMAGE_MODELS.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.name} ({m.id})
-                            </SelectItem>
-                          ))}
-                          <SelectItem value="custom">Custom model ID…</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Input
-                        id="imageGeminiModel"
-                        placeholder="e.g. imagen-3.0-generate-002 or gemini-2.5-flash-image"
-                        className="font-mono text-sm"
-                        value={settings.imageGeminiModel}
-                        onChange={(e) => setSettings({ ...settings, imageGeminiModel: e.target.value })}
-                      />
-                    </div>
-                  </div>
                 </div>
 
                 {/* Pollinations AI URL Generator */}

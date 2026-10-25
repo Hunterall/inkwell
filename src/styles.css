@@ -40,29 +40,56 @@
 
 :root {
   --radius: 0.375rem;
-  --background: oklch(0.955 0.018 85);
-  --foreground: oklch(0.21 0.015 70);
-  --paper: oklch(0.985 0.01 88);
-  --ink: oklch(0.21 0.015 70);
-  --sepia: oklch(0.58 0.04 80);
-  --card: oklch(0.985 0.01 88);
-  --card-foreground: oklch(0.21 0.015 70);
-  --popover: oklch(0.985 0.01 88);
-  --popover-foreground: oklch(0.21 0.015 70);
-  --primary: oklch(0.52 0.15 35);
-  --primary-foreground: oklch(0.98 0.01 88);
-  --secondary: oklch(0.91 0.025 82);
-  --secondary-foreground: oklch(0.21 0.015 70);
-  --muted: oklch(0.92 0.02 84);
-  --muted-foreground: oklch(0.5 0.035 75);
-  --accent: oklch(0.9 0.04 60);
-  --accent-foreground: oklch(0.3 0.06 40);
+  /* Velvet Espresso & Rosewood (Rich Literary Romance) */
+  --background: oklch(0.965 0.012 45);
+  --foreground: oklch(0.22 0.024 32);
+  --paper: oklch(0.992 0.007 50);
+  --ink: oklch(0.22 0.024 32);
+  --sepia: oklch(0.55 0.07 42);
+  --card: oklch(0.992 0.007 50);
+  --card-foreground: oklch(0.22 0.024 32);
+  --popover: oklch(0.992 0.007 50);
+  --popover-foreground: oklch(0.22 0.024 32);
+  --primary: oklch(0.46 0.135 15);
+  --primary-foreground: oklch(0.985 0.008 50);
+  --secondary: oklch(0.93 0.016 45);
+  --secondary-foreground: oklch(0.24 0.025 32);
+  --muted: oklch(0.932 0.012 45);
+  --muted-foreground: oklch(0.52 0.035 40);
+  --accent: oklch(0.915 0.032 25);
+  --accent-foreground: oklch(0.32 0.08 15);
+  --destructive: oklch(0.52 0.19 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.875 0.02 45);
+  --input: oklch(0.875 0.02 45);
+  --ring: oklch(0.46 0.135 15);
+  --shadow-page: 0 1px 0 oklch(0.875 0.02 45), 0 20px 42px -24px oklch(0.25 0.06 25 / 0.28);
+}
+
+.dark {
+  --background: oklch(0.16 0.02 30);
+  --foreground: oklch(0.94 0.01 50);
+  --paper: oklch(0.20 0.025 32);
+  --ink: oklch(0.94 0.01 50);
+  --sepia: oklch(0.62 0.07 45);
+  --card: oklch(0.20 0.025 32);
+  --card-foreground: oklch(0.94 0.01 50);
+  --popover: oklch(0.20 0.025 32);
+  --popover-foreground: oklch(0.94 0.01 50);
+  --primary: oklch(0.62 0.15 18);
+  --primary-foreground: oklch(0.16 0.02 30);
+  --secondary: oklch(0.26 0.025 35);
+  --secondary-foreground: oklch(0.94 0.01 50);
+  --muted: oklch(0.24 0.02 35);
+  --muted-foreground: oklch(0.68 0.025 45);
+  --accent: oklch(0.28 0.04 18);
+  --accent-foreground: oklch(0.94 0.01 50);
   --destructive: oklch(0.55 0.2 27);
   --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.85 0.03 80);
-  --input: oklch(0.85 0.03 80);
-  --ring: oklch(0.52 0.15 35);
-  --shadow-page: 0 1px 0 oklch(0.85 0.03 80), 0 18px 40px -24px oklch(0.3 0.05 60 / 0.35);
+  --border: oklch(0.28 0.02 35);
+  --input: oklch(0.28 0.02 35);
+  --ring: oklch(0.62 0.15 18);
+  --shadow-page: 0 1px 0 oklch(0.28 0.02 35), 0 20px 42px -24px oklch(0.08 0.03 25 / 0.6);
 }
 
 @layer base {

@@ -80,7 +80,7 @@ const LIGHTING_OPTIONS = [
 
 export type LightingCategory = "day" | "night" | "golden_hour" | "cloudy" | "rainy" | "interior";
 
-export function getFrameLightingCategory(f: {
+function getFrameLightingCategory(f: {
   lighting?: string | null;
   heading?: string | null;
   description?: string | null;
@@ -276,12 +276,25 @@ export function BoardTab({ story }: { story: Story }) {
     }
     setBusy(true);
     try {
-      const out = await streamWrite({ mode: "scenes", text, bible: bibleToText(bible) }, () => {});
+      const out = await streamWrite(
+        { mode: "scenes", text, bible: bibleToText(bible), title: story.title },
+        () => {},
+      );
       const scenes = parseScenes(out);
-      if (!scenes.length) throw new Error("Couldn't find scenes. Try again.");
+      if (!scenes.length) {
+        console.warn("[BoardTab] Raw scenes output:", out);
+        throw new Error(
+          "Could not parse storyboard scenes from the AI's response. Please try again or switch to another model like Google Gemma 4 or Nemotron in Settings.",
+        );
+      }
 
       // Delete existing frames for this story
-      const existingQuery = query(collection(db, "frames"), where("storyId", "==", story.id));
+      const uid = auth.currentUser?.uid || "";
+      const existingQuery = query(
+        collection(db, "frames"),
+        where("storyId", "==", story.id),
+        where("userId", "==", uid),
+      );
       const existingSnap = await getDocs(existingQuery);
       if (!existingSnap.empty) {
         const batch = writeBatch(db);
@@ -293,6 +306,7 @@ export function BoardTab({ story }: { story: Story }) {
       for (let i = 0; i < scenes.length; i++) {
         const s = scenes[i]!;
         await addDoc(collection(db, "frames"), {
+          userId: uid,
           storyId: story.id,
           position: i,
           heading: s.heading,
@@ -302,6 +316,7 @@ export function BoardTab({ story }: { story: Story }) {
           location: s.location || "",
           props: s.props || "",
           cast: s.cast || "",
+          createdAt: serverTimestamp(),
         });
       }
 

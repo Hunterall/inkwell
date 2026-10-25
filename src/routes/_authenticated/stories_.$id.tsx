@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Settings } from "lucide-react";
 import { doc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "@/integrations/firebase/client";
+import { auth, db } from "@/integrations/firebase/client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WriteTab } from "@/components/story/WriteTab";
 import { BibleTab } from "@/components/story/BibleTab";
@@ -25,6 +25,7 @@ export const Route = createFileRoute("/_authenticated/stories_/$id")({
 
 export type Story = {
   id: string;
+  userId?: string;
   title: string;
   logline: string;
   synopsis: string;
@@ -40,7 +41,12 @@ function StoryPage() {
     queryFn: async () => {
       const snap = await getDoc(doc(db, "stories", id));
       if (!snap.exists()) throw new Error("Story not found");
-      return { id: snap.id, ...snap.data() } as Story;
+      const data = snap.data() as Partial<Story>;
+      const uid = auth.currentUser?.uid;
+      if (data.userId && uid && data.userId !== uid) {
+        throw new Error("Access denied: You do not have permission to view this story.");
+      }
+      return { id: snap.id, ...data } as Story;
     },
   });
 

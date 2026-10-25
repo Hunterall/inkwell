@@ -4,7 +4,7 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 
 const JWKS_URL =
   "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com";
-const PROJECT_ID = process.env["VITE_FIREBASE_PROJECT_ID"] ?? "";
+const PROJECT_ID = process.env["VITE_FIREBASE_PROJECT_ID"] || "inkwell-52cb5";
 const JWKS = createRemoteJWKSet(new URL(JWKS_URL));
 
 async function verifyFirebaseToken(token: string): Promise<string> {

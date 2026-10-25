@@ -4,7 +4,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/integrations/firebase/client";
 import { DEFAULT_AI_SETTINGS, type AiSettings } from "@/lib/settings";
 
-type ImageProvider = "gemini" | "pollinations" | "cloudflare";
+type ImageProvider = "pollinations" | "cloudflare";
 
 interface ImageGenConfig {
   frameId: string;
@@ -16,12 +16,6 @@ interface ImageGenConfig {
 
 function envKeyFor(provider: ImageProvider): string {
   switch (provider) {
-    case "gemini":
-      return (
-        process.env["IMAGE_GEMINI_API_KEY"] ||
-        process.env["GEMINI_API_KEY"] ||
-        ""
-      ).trim();
     case "pollinations":
       return (
         process.env["IMAGE_POLLINATIONS_API_KEY"] ||
@@ -47,6 +41,23 @@ async function loadUserAiSettings(userId: string): Promise<AiSettings> {
     /* ignore read errors; fall back to defaults */
   }
   return DEFAULT_AI_SETTINGS;
+}
+
+function sanitizeSecrets(raw: unknown, secrets: (string | undefined | null)[]): string {
+  const msg =
+    raw instanceof Error
+      ? raw.message
+      : typeof raw === "string"
+        ? raw
+        : "Image generation failed";
+  let clean = msg;
+  for (const s of secrets) {
+    if (s && s.length > 4) {
+      clean = clean.replaceAll(s, "[REDACTED]");
+    }
+  }
+  clean = clean.replace(/Bearer\s+[A-Za-z0-9_\-.]+/gi, "Bearer [REDACTED]");
+  return clean;
 }
 
 export const generateFrameImage = createServerFn({ method: "POST" })
@@ -75,113 +86,35 @@ export const generateFrameImage = createServerFn({ method: "POST" })
         height: "720",
         nologo: "true",
         enhance: "false",
+        // Strict Privacy Controls:
+        // nofeed=true: Prevents generated frames and prompt text from appearing on public feed
+        // private=true: Prevents public indexing and community gallery recording
+        nofeed: "true",
+        private: "true",
         seed: Math.floor(Math.random() * 1000000).toString(),
       });
 
-      if (apiKey) {
-        params.append("key", apiKey);
-      }
-
       const pollinationUrl = `https://gen.pollinations.ai/image/${encodedPrompt}?${params.toString()}`;
 
-      // Fetch with headers to verify generation succeeded and convert to base64 or verified URL
+      // Authentication passed exclusively via secure HTTP headers (never leaked in URL query string)
       const headers: Record<string, string> = {};
       if (apiKey) {
         headers["Authorization"] = `Bearer ${apiKey}`;
       }
 
-      const res = await fetch(pollinationUrl, { method: "GET", headers });
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`Pollinations AI generation failed (${res.status}): ${errText.slice(0, 200)}`);
-      }
-
-      const contentType = res.headers.get("content-type") || "image/jpeg";
-      const arrayBuffer = await res.arrayBuffer();
-      const base64 = Buffer.from(arrayBuffer).toString("base64");
-      imageUrl = `data:${contentType};base64,${base64}`;
-    } else if (provider === "gemini") {
-      // Google Gemini / Imagen 3 API key
-      const apiKey = (
-        userSettings.imageGeminiApiKey?.trim() ||
-        envKeyFor("gemini")
-      ).trim();
-
-      if (!apiKey) {
-        throw new Error(
-          "No Gemini API key configured. Please enter your Gemini API key in Settings under Image Generation.",
-        );
-      }
-
-      const geminiModel =
-        userSettings.imageGeminiModel?.trim() || "imagen-3.0-generate-002";
-
-      // If Imagen model is selected
-      if (geminiModel.startsWith("imagen-")) {
-        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:predict?key=${encodeURIComponent(apiKey)}`;
-        const res = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            instances: [{ prompt }],
-            parameters: {
-              sampleCount: 1,
-              aspectRatio: "16:9",
-              outputMimeType: "image/jpeg",
-            },
-          }),
-        });
-
+      try {
+        const res = await fetch(pollinationUrl, { method: "GET", headers });
         if (!res.ok) {
           const errText = await res.text();
-          let msg = `Gemini Imagen failed (${res.status})`;
-          try {
-            const j = JSON.parse(errText);
-            msg = j?.error?.message || msg;
-          } catch {
-            /* ignore */
-          }
-          throw new Error(msg);
+          throw new Error(`Pollinations AI generation failed (${res.status}): ${errText.slice(0, 200)}`);
         }
 
-        const json = (await res.json()) as any;
-        const b64 = json.predictions?.[0]?.bytesBase64Encoded;
-        const mime = json.predictions?.[0]?.mimeType || "image/jpeg";
-        if (!b64) throw new Error("Gemini Imagen did not return any image data");
-        imageUrl = `data:${mime};base64,${b64}`;
-      } else {
-        // Native multimodal Gemini image model (e.g. gemini-2.5-flash-image)
-        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${encodeURIComponent(apiKey)}`;
-        const res = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              responseModalities: ["IMAGE"],
-            },
-          }),
-        });
-
-        if (!res.ok) {
-          const errText = await res.text();
-          let msg = `Gemini failed (${res.status})`;
-          try {
-            const j = JSON.parse(errText);
-            msg = j?.error?.message || msg;
-          } catch {
-            /* ignore */
-          }
-          throw new Error(msg);
-        }
-
-        const json = (await res.json()) as any;
-        const parts = json.candidates?.[0]?.content?.parts || [];
-        const inlinePart = parts.find((p: any) => p.inlineData?.data);
-        if (!inlinePart) {
-          throw new Error("Gemini did not return an image. Try selecting the Imagen 3 model in Settings.");
-        }
-        imageUrl = `data:${inlinePart.inlineData.mimeType || "image/jpeg"};base64,${inlinePart.inlineData.data}`;
+        const contentType = res.headers.get("content-type") || "image/jpeg";
+        const arrayBuffer = await res.arrayBuffer();
+        const base64 = Buffer.from(arrayBuffer).toString("base64");
+        imageUrl = `data:${contentType};base64,${base64}`;
+      } catch (err) {
+        throw new Error(sanitizeSecrets(err, [apiKey]));
       }
     } else if (provider === "cloudflare") {
       // Cloudflare Workers AI Image Generation
@@ -212,40 +145,44 @@ export const generateFrameImage = createServerFn({ method: "POST" })
 
       const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${cfModel}`;
 
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ prompt }),
-      });
+      try {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ prompt }),
+        });
 
-      if (!res.ok) {
-        const errText = await res.text();
-        let msg = `Cloudflare AI generation failed (${res.status})`;
-        try {
-          const j = JSON.parse(errText);
-          msg = j?.errors?.[0]?.message || j?.messages?.[0] || msg;
-        } catch {
-          /* ignore */
+        if (!res.ok) {
+          const errText = await res.text();
+          let msg = `Cloudflare AI generation failed (${res.status})`;
+          try {
+            const j = JSON.parse(errText);
+            msg = j?.errors?.[0]?.message || j?.messages?.[0] || msg;
+          } catch {
+            /* ignore */
+          }
+          throw new Error(msg);
         }
-        throw new Error(msg);
-      }
 
-      const contentType = res.headers.get("content-type") || "image/png";
+        const contentType = res.headers.get("content-type") || "image/png";
 
-      // If returned as raw binary image
-      if (contentType.startsWith("image/")) {
-        const arrayBuffer = await res.arrayBuffer();
-        const base64 = Buffer.from(arrayBuffer).toString("base64");
-        imageUrl = `data:${contentType};base64,${base64}`;
-      } else {
-        // Might be JSON containing base64 string
-        const json = (await res.json()) as any;
-        const b64 = json.result?.image || json.result?.image_base64 || json.image;
-        if (!b64) throw new Error("Cloudflare did not return an image");
-        imageUrl = b64.startsWith("data:") ? b64 : `data:image/png;base64,${b64}`;
+        // If returned as raw binary image
+        if (contentType.startsWith("image/")) {
+          const arrayBuffer = await res.arrayBuffer();
+          const base64 = Buffer.from(arrayBuffer).toString("base64");
+          imageUrl = `data:${contentType};base64,${base64}`;
+        } else {
+          // Might be JSON containing base64 string
+          const json = (await res.json()) as any;
+          const b64 = json.result?.image || json.result?.image_base64 || json.image;
+          if (!b64) throw new Error("Cloudflare did not return an image");
+          imageUrl = b64.startsWith("data:") ? b64 : `data:image/png;base64,${b64}`;
+        }
+      } catch (err) {
+        throw new Error(sanitizeSecrets(err, [apiToken, accountId]));
       }
     }
 

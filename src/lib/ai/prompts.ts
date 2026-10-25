@@ -72,9 +72,17 @@ export function buildPrompt(r: AiRequest): { instructions: string; input: string
     case "scenes":
       return {
         instructions:
-          "You break stories into visual storyboard frames for production and pitch decks. Output one scene per line in exactly this form: HEADING || visual description of key frame || LIGHTING (day, night, cloudy, rainy, golden_hour, or interior) || LOCATION (suggest a concrete real-world filming place tailored for the scene setting, e.g. for a beach scene suggest 'Goa (Palolem)' or 'Gokarna'; for mountains suggest 'Manali' or 'Munnar'; for palace suggest 'Udaipur City Palace'; or specific landmark/city) || PROPS (comma separated key props) || CAST (comma separated characters present). No numbering or extra text. Between 5 and 12 lines." +
+          `${BASE} You break stories into visual storyboard frames for production and pitch decks.\n\n` +
+          `CRITICAL FORMAT REQUIREMENT:\n` +
+          `Output each scene on a single line separated by double pipes ( || ). Do NOT output code fences, markdown tables, preambles, or numbered lists.\n\n` +
+          `Exact line format:\n` +
+          `HEADING || visual description of key frame || LIGHTING (day, night, cloudy, rainy, golden_hour, or interior) || LOCATION (concrete real-world filming place) || PROPS (comma separated props) || CAST (comma separated characters)\n\n` +
+          `Example lines:\n` +
+          `EXT. CLIFFTOP - SUNSET || Protagonist stands at rocky edge staring into the raging ocean || golden_hour || Goa (Vagator Cliffs) || Leather satchel, brass compass || Maya, Julian\n` +
+          `INT. DILAPIDATED STUDY - NIGHT || Candlelight flickers as dust-covered manuscripts are uncovered || night || Chettinad Mansion || Oil lamp, wax seals, ancient ledger || Julian\n\n` +
+          `Break the narrative into between 6 and 12 dramatic cinematic scenes covering the story from opening to climax.` +
           bible,
-        input: r.text.slice(0, 40000),
+        input: `Story to break into visual scenes:\n\n${r.text.slice(0, 40000)}`,
       };
     case "locations": {
       const sample = sampleTextForBible(r.text);
@@ -196,61 +204,180 @@ ${sample}`,
   }
 }
 
+function canonicalLighting(heading: string, description: string, rawLighting: string): string {
+  const fullText = `${heading} ${description} ${rawLighting}`.toLowerCase();
+  if (["day", "night", "cloudy", "rainy", "golden_hour", "interior"].includes(rawLighting)) {
+    return rawLighting;
+  }
+  if (fullText.includes("rain") || fullText.includes("storm") || fullText.includes("downpour") || rawLighting.includes("rain")) {
+    return "rainy";
+  }
+  if (fullText.includes("cloud") || fullText.includes("overcast") || fullText.includes("fog") || fullText.includes("mist") || rawLighting.includes("cloud")) {
+    return "cloudy";
+  }
+  if (fullText.includes("golden hour") || fullText.includes("golden_hour") || fullText.includes("sunset") || fullText.includes("sunrise") || fullText.includes("dawn") || rawLighting.includes("golden")) {
+    return "golden_hour";
+  }
+  if (fullText.includes("night") || fullText.includes("dusk") || fullText.includes("midnight") || fullText.includes("moon") || fullText.includes("dark") || fullText.includes("evening") || rawLighting.includes("night")) {
+    return "night";
+  }
+  if (rawLighting.includes("interior") || rawLighting.includes("indoor") || fullText.includes("interior") || heading.toLowerCase().startsWith("int.")) {
+    return "interior";
+  }
+  return "day";
+}
+
 export function parseScenes(text: string) {
-  return text
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.includes("||"))
-    .map((l) => {
-      const parts = l.split("||").map((p) => p.trim());
-      const heading = (parts[0] ?? "").replace(/^[-*\d.\s]+/, "").trim();
+  if (!text || !text.trim()) return [];
+
+  const cleanText = text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+
+  // 1. Check if model returned JSON
+  try {
+    const jsonMatch =
+      cleanText.match(/\[\s*\{[\s\S]*\}\s*\]/) || cleanText.match(/\{\s*"scenes"[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const list = Array.isArray(parsed) ? parsed : parsed.scenes || parsed.frames || [];
+      if (Array.isArray(list) && list.length > 0) {
+        return list
+          .map((item: any, idx: number) => {
+            const heading = (item.heading || item.scene || item.title || `Scene ${idx + 1}`).trim();
+            const description = (item.description || item.visual || item.action || "").trim();
+            const rawLighting = (item.lighting || "").toLowerCase().trim();
+            const location = (item.location || item.place || heading).trim();
+            const props = Array.isArray(item.props) ? item.props.join(", ") : (item.props || "");
+            const cast = Array.isArray(item.cast) ? item.cast.join(", ") : (item.cast || "");
+            const lighting = canonicalLighting(heading, description, rawLighting);
+            return { heading, description, lighting, location, props, cast };
+          })
+          .filter((s: any) => s.heading && s.description);
+      }
+    }
+  } catch {
+    /* continue to text parsers */
+  }
+
+  const lines = cleanText.split("\n").map((l) => l.trim()).filter(Boolean);
+  const results: {
+    heading: string;
+    description: string;
+    lighting: string;
+    location: string;
+    props: string;
+    cast: string;
+  }[] = [];
+
+  for (const line of lines) {
+    // Skip markdown table separators and headers
+    if (/^\|?\s*[-:]+[-|\s:]*$/.test(line)) continue;
+    if (/^\|\s*(?:Heading|Scene|Number|Frame|#)\s*\|/i.test(line)) continue;
+
+    let parts: string[] = [];
+
+    // Format A: Double pipes ( || )
+    if (line.includes("||")) {
+      parts = line.split("||").map((p) => p.trim());
+    }
+    // Format B: Single pipe or markdown table row ( | )
+    else if ((line.match(/\|/g) || []).length >= 2) {
+      parts = line
+        .split("|")
+        .map((p) => p.trim())
+        .filter((p, i, arr) => !(i === 0 && p === "") && !(i === arr.length - 1 && p === ""));
+    }
+
+    if (parts.length >= 2) {
+      const heading = (parts[0] ?? "").replace(/^[-*#\d.\s]+/, "").trim();
       const description = parts[1] ?? "";
-      const rawLighting = parts[2] ? parts[2].toLowerCase().trim() : "";
-      let location = parts[3] ?? "";
-      const props = parts[4] ?? "";
-      const cast = parts[5] ?? "";
+      if (heading && description) {
+        const rawLighting = parts[2] ? parts[2].toLowerCase().trim() : "";
+        let location = parts[3] ?? "";
+        const props = parts[4] ?? "";
+        const cast = parts[5] ?? "";
+        const lighting = canonicalLighting(heading, description, rawLighting);
 
-      // Robust canonical lighting classification
-      const fullText = `${heading} ${description} ${rawLighting}`.toLowerCase();
-      let lighting = "day";
-      if (["day", "night", "cloudy", "rainy", "golden_hour", "interior"].includes(rawLighting)) {
-        lighting = rawLighting;
-      } else if (fullText.includes("rain") || fullText.includes("storm") || fullText.includes("downpour") || rawLighting.includes("rain")) {
-        lighting = "rainy";
-      } else if (fullText.includes("cloud") || fullText.includes("overcast") || fullText.includes("fog") || fullText.includes("mist") || rawLighting.includes("cloud")) {
-        lighting = "cloudy";
-      } else if (fullText.includes("golden hour") || fullText.includes("golden_hour") || fullText.includes("sunset") || fullText.includes("sunrise") || fullText.includes("dawn") || rawLighting.includes("golden")) {
-        lighting = "golden_hour";
-      } else if (fullText.includes("night") || fullText.includes("dusk") || fullText.includes("midnight") || fullText.includes("moon") || fullText.includes("dark") || fullText.includes("evening") || rawLighting.includes("night")) {
-        lighting = "night";
-      } else if (rawLighting.includes("day") || fullText.includes("day") || fullText.includes("morning") || fullText.includes("afternoon")) {
-        lighting = "day";
-      } else if (rawLighting.includes("interior") || rawLighting.includes("indoor") || fullText.includes("interior") || heading.toLowerCase().startsWith("int.")) {
-        lighting = "interior";
-      } else {
-        lighting = "day";
-      }
-
-      if (!location) {
-        // e.g. "INT. KITCHEN - DAY" or "EXT. ROOFTOP - NIGHT"
-        const headingMatch = heading.match(/(?:INT\.|EXT\.|INT\/EXT\.)\s+([^-–—]+)/i);
-        if (headingMatch && headingMatch[1]) {
-          location = headingMatch[1].trim();
-        } else {
-          location = heading;
+        if (!location) {
+          const headingMatch = heading.match(/(?:INT\.|EXT\.|INT\/EXT\.)\s+([^-–—]+)/i);
+          location = headingMatch && headingMatch[1] ? headingMatch[1].trim() : heading;
         }
-      }
 
-      return {
+        results.push({
+          heading,
+          description,
+          lighting,
+          location,
+          props,
+          cast,
+        });
+        continue;
+      }
+    }
+
+    // Format C: Scene headings with dash or colon, e.g. "INT. ROOM - DAY: Julian discovers the hidden map..."
+    const colonMatch = line.match(
+      /^(?:(?:\d+\.|\*|-|Scene\s+\d+:?)\s*)?((?:INT\.|EXT\.|INT\/EXT\.)[^-–—:\n]+(?:-[^-–—:\n]+)?)\s*[:–—]\s*(.+)$/i,
+    );
+    if (colonMatch && colonMatch[1] && colonMatch[2]) {
+      const heading = colonMatch[1].replace(/^[-*#\d.\s]+/, "").trim();
+      const description = colonMatch[2].trim();
+      const lighting = canonicalLighting(heading, description, "");
+      const headingMatch = heading.match(/(?:INT\.|EXT\.|INT\/EXT\.)\s+([^-–—]+)/i);
+      const location = headingMatch && headingMatch[1] ? headingMatch[1].trim() : heading;
+      results.push({
         heading,
         description,
         lighting,
         location,
-        props,
-        cast,
-      };
-    })
-    .filter((s) => s.heading && s.description);
+        props: "",
+        cast: "",
+      });
+      continue;
+    }
+
+    // Format D: Numbered scenes, e.g. "1. The Clifftop Confrontation: Julian watches the storm brew..."
+    const numberedMatch = line.match(
+      /^(?:\d+\.|\bScene\s+\d+:?)\s+([^:–—\n]{3,60})\s*[:–—]\s*(.{10,})$/i,
+    );
+    if (numberedMatch && numberedMatch[1] && numberedMatch[2]) {
+      const heading = numberedMatch[1].trim();
+      const description = numberedMatch[2].trim();
+      const lighting = canonicalLighting(heading, description, "");
+      results.push({
+        heading,
+        description,
+        lighting,
+        location: heading,
+        props: "",
+        cast: "",
+      });
+      continue;
+    }
+  }
+
+  // Format E: Multi-line paragraph blocks fallback
+  if (results.length === 0) {
+    const blocks = cleanText.split(/\n\s*\n+/);
+    for (const block of blocks) {
+      const blockLines = block.split("\n").map((b) => b.trim()).filter(Boolean);
+      if (blockLines.length >= 2) {
+        const firstLine = blockLines[0]!.replace(/^[-*#\d.\s]+/, "").trim();
+        const remaining = blockLines.slice(1).join(" ").trim();
+        if (firstLine.length < 100 && remaining.length > 15) {
+          results.push({
+            heading: firstLine,
+            description: remaining,
+            lighting: canonicalLighting(firstLine, remaining, ""),
+            location: firstLine,
+            props: "",
+            cast: "",
+          });
+        }
+      }
+    }
+  }
+
+  return results;
 }
 
 export type ExtractedBible = {
