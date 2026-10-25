@@ -85,9 +85,10 @@ function AuthPage() {
         return;
       }
       if (err.code === "auth/unauthorized-domain") {
+        const domain = typeof window !== "undefined" ? window.location.hostname : "your Vercel domain";
         toast.error(
-          "Domain unauthorized in Firebase. Add localhost to Firebase Console > Authentication > Settings > Authorized domains.",
-          { duration: 6000 },
+          `Domain "${domain}" is not authorized. Add it in Firebase Console > Authentication > Settings > Authorized domains.`,
+          { duration: 9000 },
         );
         return;
       }
@@ -106,8 +107,16 @@ function AuthPage() {
       } else {
         await signInWithEmailAndPassword(auth, email, password);
       }
-    } catch (err) {
-      toast.error((err as Error).message);
+    } catch (err: any) {
+      if (err.code === "auth/unauthorized-domain") {
+        const domain = typeof window !== "undefined" ? window.location.hostname : "your Vercel domain";
+        toast.error(
+          `Domain "${domain}" is not authorized. Add it in Firebase Console > Authentication > Settings > Authorized domains.`,
+          { duration: 9000 },
+        );
+        return;
+      }
+      toast.error(err.message || "Authentication failed.");
     } finally {
       setBusy(false);
     }
