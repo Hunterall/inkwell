@@ -32,11 +32,15 @@ export default defineConfig(({ command }) => ({
     }),
     command === "build" &&
       nitro({
-        preset: "cloudflare-module",
-        cloudflare: {
-          nodeCompat: true,
-          deployConfig: true,
-        },
+        preset: process.env.VERCEL ? "vercel" : (process.env.NITRO_PRESET || "cloudflare-module"),
+        ...(process.env.VERCEL
+          ? {}
+          : {
+              cloudflare: {
+                nodeCompat: true,
+                deployConfig: true,
+              },
+            }),
       }),
     viteReact(),
   ].filter(Boolean),

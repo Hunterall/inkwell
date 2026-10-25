@@ -16,6 +16,7 @@ const MODES = [
   "bible",
   "locations",
   "logline",
+  "cinematography",
 ];
 
 function sanitizeError(raw: unknown, keyToRedact?: string | null): string {

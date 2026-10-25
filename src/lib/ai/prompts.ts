@@ -8,7 +8,8 @@ export type AiMode =
   | "scenes"
   | "bible"
   | "locations"
-  | "logline";
+  | "logline"
+  | "cinematography";
 
 export type AiRequest = {
   mode: AiMode;
@@ -76,14 +77,47 @@ export function buildPrompt(r: AiRequest): { instructions: string; input: string
           `CRITICAL FORMAT REQUIREMENT:\n` +
           `Output each scene on a single line separated by double pipes ( || ). Do NOT output code fences, markdown tables, preambles, or numbered lists.\n\n` +
           `Exact line format:\n` +
-          `HEADING || visual description of key frame || LIGHTING (day, night, cloudy, rainy, golden_hour, or interior) || LOCATION (concrete real-world filming place) || PROPS (comma separated props) || CAST (comma separated characters)\n\n` +
+          `HEADING || visual description of key frame || LIGHTING (day, night, cloudy, rainy, golden_hour, or interior) || LOCATION (concrete real-world filming place) || PROPS (comma separated props) || CAST (comma separated characters) || FRAMING (e.g. Close-Up (CU), Wide Shot (WS), Medium Shot (MS), Over-the-Shoulder (OTS)) || CAMERA_ANGLE (e.g. Eye-Level, Low Angle, High Angle, Dutch Angle) || MOVEMENT (e.g. Push-In, Static, Tracking, Handheld)\n\n` +
           `Example lines:\n` +
-          `EXT. CLIFFTOP - SUNSET || Protagonist stands at rocky edge staring into the raging ocean || golden_hour || Goa (Vagator Cliffs) || Leather satchel, brass compass || Maya, Julian\n` +
-          `INT. DILAPIDATED STUDY - NIGHT || Candlelight flickers as dust-covered manuscripts are uncovered || night || Chettinad Mansion || Oil lamp, wax seals, ancient ledger || Julian\n\n` +
+          `EXT. CLIFFTOP - SUNSET || Protagonist stands at rocky edge staring into the raging ocean || golden_hour || Goa (Vagator Cliffs) || Leather satchel, brass compass || Maya, Julian || Wide Shot (WS) || Low Angle || Push-In / Dolly In\n` +
+          `INT. DILAPIDATED STUDY - NIGHT || Candlelight flickers as dust-covered manuscripts are uncovered || night || Chettinad Mansion || Oil lamp, wax seals, ancient ledger || Julian || Close-Up (CU) || Eye-Level || Handheld\n\n` +
           `Break the narrative into between 6 and 12 dramatic cinematic scenes covering the story from opening to climax.` +
           bible,
         input: `Story to break into visual scenes:\n\n${r.text.slice(0, 40000)}`,
       };
+    case "cinematography": {
+      const sample = sampleTextForBible(r.text, 25000);
+      return {
+        instructions:
+          "You are an elite Hollywood Director of Photography (DoP) and Master Cinematographer (in the tradition of Roger Deakins, Hoyte van Hoytema, and Emmanuel Lubezki). Your task is to analyze the provided storyboard scenes or screenplay and design a professional cinematography shot list with expert camera angles, shot framing, camera movement, lens choices, and director's visual intent.\n\n" +
+          "RULES FOR CINEMATOGRAPHY ANALYSIS:\n" +
+          "1. For EVERY scene, determine the optimal cinematic choices that amplify emotional subtext and dramatic tension:\n" +
+          "   - 'framing': Specific shot size (e.g. 'Extreme Close-Up (ECU)', 'Close-Up (CU)', 'Medium Close-Up (MCU)', 'Medium Shot (MS)', 'Full Shot (FS)', 'Wide Shot (WS)', 'Extreme Wide Shot (EWS)', 'Over-the-Shoulder (OTS)', 'Point-of-View (POV)', 'Cowboy Shot').\n" +
+          "   - 'cameraAngle': Camera angle relative to subject (e.g. 'Eye-Level', 'Low Angle', 'High Angle', 'Dutch Angle (Canted)', 'Overhead / Bird\'s Eye', 'Worm\'s Eye', 'Ground Level').\n" +
+          "   - 'movement': Camera movement dynamic (e.g. 'Static', 'Push-In / Dolly In', 'Pull-Out / Dolly Out', 'Tracking / Steadicam', 'Handheld', 'Pan / Tilt', 'Whip Pan', 'Crane / Jib').\n" +
+          "   - 'focalLength': Recommended focal length (e.g. '24mm Ultra-Wide', '35mm Wide-Standard', '50mm Natural', '85mm Portrait', '135mm Telephoto').\n" +
+          "   - 'directorNotes': Concise 1-2 sentence director's note explaining the visual philosophy and emotional psychology behind these shot choices (why this angle/framing enhances the narrative beat).\n" +
+          "   - 'lightingAtmosphere': 3-5 word cinematography lighting atmosphere (e.g. 'Chiaroscuro Noir Shadows', 'Soft Diffused Golden Window Light', 'Neon Night Wet Reflection', 'Overcast Cool Atmospheric').\n" +
+          "2. Output ONLY a valid JSON object matching the requested schema. No code fences, no markdown formatting, no preamble, no text outside the JSON.",
+        input: `Analyze the following scenes/story and provide a cinematography shot list with camera angles and framing for each scene:\n\n${sample}
+\nOutput a JSON object with this exact schema:
+{
+  "visualStyle": "Overarching visual and cinematography philosophy for this story (e.g. Fincher-esque clinical precision with slow creeping push-ins, or Deakins naturalistic poetic lighting)",
+  "scenes": [
+    {
+      "sceneNumber": 1,
+      "heading": "Scene heading",
+      "framing": "Close-Up (CU)",
+      "cameraAngle": "Low Angle",
+      "movement": "Push-In / Dolly In",
+      "focalLength": "85mm Portrait",
+      "lightingAtmosphere": "High-contrast chiaroscuro with deep shadows",
+      "directorNotes": "Low angle establishes the protagonist's impending dominance while the slow push-in tightens psychological claustrophobia as the realization dawns."
+    }
+  ]
+}`,
+      };
+    }
     case "locations": {
       const sample = sampleTextForBible(r.text);
       return {
@@ -248,8 +282,11 @@ export function parseScenes(text: string) {
             const location = (item.location || item.place || heading).trim();
             const props = Array.isArray(item.props) ? item.props.join(", ") : (item.props || "");
             const cast = Array.isArray(item.cast) ? item.cast.join(", ") : (item.cast || "");
+            const framing = (item.framing || item.shot || "").trim();
+            const camera_angle = (item.camera_angle || item.cameraAngle || item.angle || "").trim();
+            const movement = (item.movement || item.motion || "").trim();
             const lighting = canonicalLighting(heading, description, rawLighting);
-            return { heading, description, lighting, location, props, cast };
+            return { heading, description, lighting, location, props, cast, framing, camera_angle, movement };
           })
           .filter((s: any) => s.heading && s.description);
       }
@@ -266,6 +303,9 @@ export function parseScenes(text: string) {
     location: string;
     props: string;
     cast: string;
+    framing?: string;
+    camera_angle?: string;
+    movement?: string;
   }[] = [];
 
   for (const line of lines) {
@@ -295,6 +335,9 @@ export function parseScenes(text: string) {
         let location = parts[3] ?? "";
         const props = parts[4] ?? "";
         const cast = parts[5] ?? "";
+        const framing = parts[6] ? parts[6].trim() : "";
+        const camera_angle = parts[7] ? parts[7].trim() : "";
+        const movement = parts[8] ? parts[8].trim() : "";
         const lighting = canonicalLighting(heading, description, rawLighting);
 
         if (!location) {
@@ -309,6 +352,9 @@ export function parseScenes(text: string) {
           location,
           props,
           cast,
+          framing,
+          camera_angle,
+          movement,
         });
         continue;
       }
@@ -610,4 +656,116 @@ export function parseLoglineResult(text: string): LoglineResult {
       options: lines.map((l, i) => ({ angle: `Option ${i + 1}`, text: l })),
     };
   }
+}
+
+export type CinematographyShot = {
+  sceneNumber?: number;
+  heading?: string;
+  framing: string;
+  cameraAngle: string;
+  movement?: string;
+  focalLength?: string;
+  lightingAtmosphere?: string;
+  directorNotes?: string;
+};
+
+export type CinematographyAnalysis = {
+  visualStyle?: string;
+  scenes: CinematographyShot[];
+};
+
+export function parseCinematographyAnalysis(text: string): CinematographyAnalysis {
+  let cleaned = text.trim();
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  }
+  const firstBrace = cleaned.indexOf("{");
+  const lastBrace = cleaned.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    cleaned = cleaned.slice(firstBrace, lastBrace + 1);
+  }
+
+  try {
+    const parsed = JSON.parse(cleaned);
+    const visualStyle =
+      typeof parsed.visualStyle === "string" && parsed.visualStyle.trim()
+        ? parsed.visualStyle.trim()
+        : "Cinematic, atmosphere-driven visual direction with purposeful camera movement and expressive framing.";
+
+    const rawList = Array.isArray(parsed.scenes)
+      ? parsed.scenes
+      : Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed.shots)
+          ? parsed.shots
+          : [];
+
+    const scenes: CinematographyShot[] = rawList.map((item: any, idx: number) => {
+      const heading = (item.heading || item.scene || `Scene ${idx + 1}`).trim();
+      const framing = (item.framing || item.shotSize || item.shot || "Medium Shot (MS)").trim();
+      const cameraAngle = (item.cameraAngle || item.angle || item.camera_angle || "Eye-Level").trim();
+      const movement = (item.movement || item.cameraMovement || item.motion || "Static").trim();
+      const focalLength = (item.focalLength || item.lens || "50mm Natural").trim();
+      const lightingAtmosphere = (item.lightingAtmosphere || item.lighting || "").trim();
+      const directorNotes = (item.directorNotes || item.notes || item.rationale || item.description || "").trim();
+
+      return {
+        sceneNumber: typeof item.sceneNumber === "number" ? item.sceneNumber : idx + 1,
+        heading,
+        framing,
+        cameraAngle,
+        movement,
+        focalLength,
+        lightingAtmosphere,
+        directorNotes,
+      };
+    });
+
+    if (scenes.length > 0) {
+      return { visualStyle, scenes };
+    }
+  } catch {
+    /* Fallback to text parsing */
+  }
+
+  // Fallback heuristic: parse line-by-line if model didn't return valid JSON
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const fallbackScenes: CinematographyShot[] = [];
+  let sceneCount = 0;
+
+  for (const line of lines) {
+    if (/(?:Scene\s*\d+|Shot\s*\d+|INT\.|EXT\.)/i.test(line)) {
+      sceneCount++;
+      const parts = line.split(/[|:–—]/).map((p) => p.trim());
+      const heading = parts[0] || `Scene ${sceneCount}`;
+      const framing = parts.find((p) => /close-up|wide|medium|shot|pov|ots|cowboy/i.test(p)) || "Medium Shot (MS)";
+      const cameraAngle = parts.find((p) => /angle|level|overhead|bird|worm|dutch/i.test(p)) || "Eye-Level";
+      const movement = parts.find((p) => /push|pull|static|handheld|tracking|pan|tilt/i.test(p)) || "Static";
+      const directorNotes = parts.length > 2 ? parts[parts.length - 1] : "";
+
+      fallbackScenes.push({
+        sceneNumber: sceneCount,
+        heading,
+        framing,
+        cameraAngle,
+        movement,
+        directorNotes,
+      });
+    }
+  }
+
+  return {
+    visualStyle: "Classic narrative cinematography with motivated framing and emotional shot compositions.",
+    scenes: fallbackScenes.length > 0 ? fallbackScenes : [
+      {
+        sceneNumber: 1,
+        heading: "Scene 1: Establishing",
+        framing: "Wide Shot (WS)",
+        cameraAngle: "Eye-Level",
+        movement: "Slow Push-In",
+        focalLength: "35mm Wide",
+        directorNotes: "Establishes spatial geography and emotional tone before moving closer into the characters' inner world.",
+      },
+    ],
+  };
 }

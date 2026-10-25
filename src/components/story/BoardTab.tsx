@@ -22,6 +22,11 @@ import {
   CheckCircle2,
   Trash2,
   Plus,
+  Video,
+  Camera,
+  Maximize2,
+  Focus,
+  Copy,
 } from "lucide-react";
 import { jsPDF } from "jspdf";
 import {
@@ -55,7 +60,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { streamWrite } from "@/lib/ai/stream-client";
-import { parseScenes, parseSuggestedLocations, type SuggestedLocation } from "@/lib/ai/prompts";
+import {
+  parseScenes,
+  parseSuggestedLocations,
+  parseCinematographyAnalysis,
+  type SuggestedLocation,
+  type CinematographyAnalysis,
+  type CinematographyShot,
+} from "@/lib/ai/prompts";
 import { generateFrameImage } from "@/lib/frames.functions";
 import {
   bibleToText,
@@ -65,6 +77,9 @@ import {
   useFrames,
   type Frame,
   type BibleEntry,
+  FRAMING_OPTIONS,
+  CAMERA_ANGLE_OPTIONS,
+  CAMERA_MOVEMENT_OPTIONS,
 } from "./data";
 import { getAiSettings } from "@/lib/settings";
 import type { Story } from "@/routes/_authenticated/stories_.$id";
@@ -258,6 +273,16 @@ export function BoardTab({ story }: { story: Story }) {
   const [savingScoutedToBible, setSavingScoutedToBible] = useState(false);
   const [applyingToFrames, setApplyingToFrames] = useState(false);
 
+  // Cinematography & Camera Analysis state
+  const [analyzingCamera, setAnalyzingCamera] = useState(false);
+  const [cinematographyOpen, setCinematographyOpen] = useState(false);
+  const [cinematographyData, setCinematographyData] = useState<CinematographyAnalysis | null>(null);
+  const [selectedShotFraming, setSelectedShotFraming] = useState<Record<number, string>>({});
+  const [selectedShotAngle, setSelectedShotAngle] = useState<Record<number, string>>({});
+  const [selectedShotMovement, setSelectedShotMovement] = useState<Record<number, string>>({});
+  const [applyingCinematography, setApplyingCinematography] = useState(false);
+  const [analyzingSingleShotId, setAnalyzingSingleShotId] = useState<string | null>(null);
+
   // Compute breakdown stats using robust classification
   const stats = {
     day: frames.filter((f) => getFrameLightingCategory(f) === "day"),
@@ -302,7 +327,7 @@ export function BoardTab({ story }: { story: Story }) {
         await batch.commit();
       }
 
-      // Add new frames
+      // Add new frames with camera framing & angle defaults
       for (let i = 0; i < scenes.length; i++) {
         const s = scenes[i]!;
         await addDoc(collection(db, "frames"), {
@@ -316,6 +341,9 @@ export function BoardTab({ story }: { story: Story }) {
           location: s.location || "",
           props: s.props || "",
           cast: s.cast || "",
+          framing: s.framing || "Medium Shot (MS)",
+          camera_angle: s.camera_angle || "Eye-Level",
+          movement: s.movement || "Static",
           createdAt: serverTimestamp(),
         });
       }
@@ -326,6 +354,138 @@ export function BoardTab({ story }: { story: Story }) {
       toast.error((e as Error).message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function runCinematographyAnalysis() {
+    let sourceText = "";
+    if (frames.length > 0) {
+      sourceText = frames
+        .map(
+          (f, idx) =>
+            `Shot ${idx + 1}: ${f.heading}\nDescription: ${f.description}\nLocation: ${f.location || "Unspecified"}\nCast: ${f.cast || "None"}\nLighting: ${f.lighting || "day"}\nCurrent Framing: ${f.framing || "None"}\nCurrent Angle: ${f.camera_angle || "None"}`,
+        )
+        .join("\n\n");
+    } else {
+      sourceText = (story.script.trim() || fullText(chapters)).trim();
+    }
+
+    if (!sourceText) {
+      toast.error("Write a script, chapters, or break down scenes first to analyze cinematography.");
+      return;
+    }
+
+    setAnalyzingCamera(true);
+    try {
+      const out = await streamWrite(
+        {
+          mode: "cinematography",
+          text: sourceText,
+          title: story.title,
+          style: story.genre,
+          bible: bibleToText(bible),
+        },
+        () => {},
+      );
+
+      const parsed = parseCinematographyAnalysis(out);
+      if (!parsed.scenes || parsed.scenes.length === 0) {
+        throw new Error("Could not parse cinematography analysis. Please try again.");
+      }
+
+      setCinematographyData(parsed);
+
+      // Initialize selection states with AI recommendations
+      const initialFraming: Record<number, string> = {};
+      const initialAngle: Record<number, string> = {};
+      const initialMovement: Record<number, string> = {};
+      parsed.scenes.forEach((s, idx) => {
+        initialFraming[idx] = s.framing || "Medium Shot (MS)";
+        initialAngle[idx] = s.cameraAngle || "Eye-Level";
+        initialMovement[idx] = s.movement || "Static";
+      });
+      setSelectedShotFraming(initialFraming);
+      setSelectedShotAngle(initialAngle);
+      setSelectedShotMovement(initialMovement);
+
+      setCinematographyOpen(true);
+      toast.success(`Analyzed cinematography direction for ${parsed.scenes.length} scenes!`);
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to analyze cinematography.");
+    } finally {
+      setAnalyzingCamera(false);
+    }
+  }
+
+  async function applyCinematographyToFrames() {
+    if (!cinematographyData || !cinematographyData.scenes.length || !frames.length) {
+      setCinematographyOpen(false);
+      return;
+    }
+    setApplyingCinematography(true);
+    try {
+      const batch = writeBatch(db);
+      frames.forEach((f, idx) => {
+        const shot =
+          cinematographyData.scenes[idx] ||
+          cinematographyData.scenes[idx % cinematographyData.scenes.length];
+        if (shot) {
+          const framing = selectedShotFraming[idx] || shot.framing || "Medium Shot (MS)";
+          const camera_angle = selectedShotAngle[idx] || shot.cameraAngle || "Eye-Level";
+          const movement = selectedShotMovement[idx] || shot.movement || "Static";
+          const focal_length = shot.focalLength || "";
+          const director_notes = shot.directorNotes || "";
+
+          batch.update(doc(db, "frames", f.id), {
+            framing,
+            camera_angle,
+            movement,
+            ...(focal_length ? { focal_length } : {}),
+            ...(director_notes ? { director_notes } : {}),
+          });
+        }
+      });
+
+      await batch.commit();
+      qc.invalidateQueries({ queryKey: ["frames", story.id] });
+      toast.success("Applied camera angles, framing, and movement to all storyboard frames!");
+      setCinematographyOpen(false);
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to apply cinematography.");
+    } finally {
+      setApplyingCinematography(false);
+    }
+  }
+
+  async function suggestSingleShotFraming(frame: Frame) {
+    setAnalyzingSingleShotId(frame.id);
+    try {
+      const promptText = `Scene: ${frame.heading}\nDescription: ${frame.description}\nLighting: ${frame.lighting || "day"}\nLocation: ${frame.location || ""}\nStory Genre: ${story.genre}`;
+      const out = await streamWrite(
+        {
+          mode: "cinematography",
+          text: promptText,
+          title: story.title,
+          instruction: "Provide optimal framing, camera angle, and camera movement for this specific scene.",
+        },
+        () => {},
+      );
+      const parsed = parseCinematographyAnalysis(out);
+      const shot = parsed.scenes[0];
+      if (shot) {
+        await updateFrameField(frame.id, {
+          framing: shot.framing,
+          camera_angle: shot.cameraAngle,
+          movement: shot.movement || "Static",
+          focal_length: shot.focalLength || "",
+          director_notes: shot.directorNotes || "",
+        });
+        toast.success(`Framing updated: ${shot.framing} • ${shot.cameraAngle}`);
+      }
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to generate shot suggestion.");
+    } finally {
+      setAnalyzingSingleShotId(null);
     }
   }
 
@@ -497,6 +657,15 @@ export function BoardTab({ story }: { story: Story }) {
           >
             <Compass className="mr-2 h-4 w-4 text-sepia" />
             {scoutingLocations ? "Scouting Places…" : "Scout Scene Places"}
+          </Button>
+          <Button
+            variant="outline"
+            disabled={analyzingCamera || (!story.script.trim() && !chapters.length && !frames.length)}
+            onClick={runCinematographyAnalysis}
+            className="border-sepia/30 bg-sepia/5 hover:bg-sepia/15 text-foreground"
+          >
+            <Video className="mr-2 h-4 w-4 text-sepia" />
+            {analyzingCamera ? "Analyzing Framing & Angles…" : "Analyze Camera & Framing"}
           </Button>
           <Button
             variant="secondary"
@@ -741,9 +910,124 @@ export function BoardTab({ story }: { story: Story }) {
                             onBlur={(e) => updateFrameField(f.id, { props: e.target.value })}
                           />
                         </div>
+
+                        {/* Cinematography & Framing Controls */}
+                        <div className="pt-2 border-t border-border/60 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-medium text-foreground flex items-center gap-1">
+                              <Video className="h-3 w-3 text-sepia" /> Camera & Framing
+                            </label>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-1.5 text-[10px] text-sepia hover:text-sepia hover:bg-sepia/10 font-mono"
+                              disabled={analyzingSingleShotId === f.id}
+                              onClick={() => suggestSingleShotFraming(f)}
+                            >
+                              <Sparkles className="h-3 w-3 mr-1" />
+                              {analyzingSingleShotId === f.id ? "Analyzing…" : "AI Suggest Shot"}
+                            </Button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <label className="text-[10px] text-muted-foreground">Framing / Shot Size</label>
+                              <Select
+                                value={f.framing || "Medium Shot (MS)"}
+                                onValueChange={(val) => updateFrameField(f.id, { framing: val })}
+                              >
+                                <SelectTrigger className="h-7 text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {FRAMING_OPTIONS.map((opt) => (
+                                    <SelectItem key={opt.value} value={opt.value}>
+                                      {opt.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[10px] text-muted-foreground">Camera Angle</label>
+                              <Select
+                                value={f.camera_angle || "Eye-Level"}
+                                onValueChange={(val) => updateFrameField(f.id, { camera_angle: val })}
+                              >
+                                <SelectTrigger className="h-7 text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {CAMERA_ANGLE_OPTIONS.map((opt) => (
+                                    <SelectItem key={opt.value} value={opt.value}>
+                                      {opt.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[10px] text-muted-foreground">Camera Movement</label>
+                            <Select
+                              value={f.movement || "Static"}
+                              onValueChange={(val) => updateFrameField(f.id, { movement: val })}
+                            >
+                              <SelectTrigger className="h-7 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {CAMERA_MOVEMENT_OPTIONS.map((opt) => (
+                                  <SelectItem key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[10px] text-muted-foreground">Director's Visual Intent</label>
+                            <Input
+                              defaultValue={f.director_notes || ""}
+                              placeholder="e.g. Slow push-in to heighten psychological claustrophobia"
+                              className="h-7 text-xs font-sans"
+                              onBlur={(e) => updateFrameField(f.id, { director_notes: e.target.value })}
+                            />
+                          </div>
+                        </div>
                       </div>
                     ) : (
-                      <div className="space-y-1 text-muted-foreground">
+                      <div className="space-y-1.5 text-muted-foreground">
+                        {/* Camera Angle & Framing Badges */}
+                        {(f.framing || f.camera_angle || f.movement) && (
+                          <div className="flex flex-wrap items-center gap-1.5 py-0.5">
+                            {f.framing && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-sepia/10 text-sepia border border-sepia/25 font-semibold">
+                                <Maximize2 className="h-2.5 w-2.5" />
+                                {f.framing}
+                              </span>
+                            )}
+                            {f.camera_angle && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/25 font-semibold">
+                                <Video className="h-2.5 w-2.5" />
+                                {f.camera_angle}
+                              </span>
+                            )}
+                            {f.movement && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-muted text-muted-foreground border border-border">
+                                <Film className="h-2.5 w-2.5" />
+                                {f.movement}
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {f.director_notes && (
+                          <p className="text-[11px] font-serif italic text-foreground/80 line-clamp-2 bg-muted/30 p-1.5 rounded border border-border/40">
+                            "{f.director_notes}"
+                          </p>
+                        )}
+
                         {f.location && (
                           <div className="flex items-center gap-1.5">
                             <MapPin className="h-3 w-3 text-sepia shrink-0" />
@@ -951,6 +1235,185 @@ export function BoardTab({ story }: { story: Story }) {
               >
                 <CheckCircle2 className="mr-2 h-4 w-4" />
                 {applyingToFrames ? "Applying…" : "Apply Places to Frames"}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cinematography & Camera Director Dialog */}
+      <Dialog open={cinematographyOpen} onOpenChange={setCinematographyOpen}>
+        <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col p-6 overflow-hidden">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-display flex items-center gap-2">
+              <Video className="h-6 w-6 text-sepia" />
+              Cinematography & Framing Analysis
+            </DialogTitle>
+            <DialogDescription>
+              AI Director of Photography breakdown analyzing emotional subtext, visual tension, and scene dynamics to recommend optimal camera angles, shot framing, and camera movement.
+            </DialogDescription>
+          </DialogHeader>
+
+          {cinematographyData && (
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1 pt-3 min-h-0">
+              {cinematographyData.visualStyle && (
+                <div className="p-3.5 rounded-lg border border-sepia/30 bg-sepia/5 text-xs text-foreground/90 space-y-1">
+                  <div className="font-semibold text-sepia flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider">
+                    <Film className="h-3.5 w-3.5" /> Overarching Visual Philosophy
+                  </div>
+                  <p className="font-serif leading-relaxed text-sm">{cinematographyData.visualStyle}</p>
+                </div>
+              )}
+
+              <div className="space-y-3">
+                {cinematographyData.scenes.map((scene, idx) => {
+                  const currentFraming = selectedShotFraming[idx] || scene.framing || "Medium Shot (MS)";
+                  const currentAngle = selectedShotAngle[idx] || scene.cameraAngle || "Eye-Level";
+                  const currentMovement = selectedShotMovement[idx] || scene.movement || "Static";
+
+                  return (
+                    <div
+                      key={idx}
+                      className="p-4 rounded-lg border border-border bg-card shadow-xs space-y-3 transition-colors hover:border-sepia/40"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-bold text-sepia bg-sepia/10 px-2 py-0.5 rounded">
+                            Shot #{idx + 1}
+                          </span>
+                          <span className="font-mono text-xs font-medium text-foreground line-clamp-1">
+                            {scene.heading}
+                          </span>
+                        </div>
+                        {scene.focalLength && (
+                          <span className="font-mono text-[11px] text-muted-foreground flex items-center gap-1">
+                            <Focus className="h-3 w-3 text-sepia" /> Lens: {scene.focalLength}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Pill Badges / Controls */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                        {/* Framing Selector */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <Maximize2 className="h-3 w-3 text-sepia" /> Framing / Shot Size
+                          </label>
+                          <Select
+                            value={currentFraming}
+                            onValueChange={(val) =>
+                              setSelectedShotFraming((prev) => ({ ...prev, [idx]: val }))
+                            }
+                          >
+                            <SelectTrigger className="h-7 text-xs font-sans">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {FRAMING_OPTIONS.map((opt) => (
+                                <SelectItem key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {/* Angle Selector */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <Video className="h-3 w-3 text-indigo-400" /> Camera Angle
+                          </label>
+                          <Select
+                            value={currentAngle}
+                            onValueChange={(val) =>
+                              setSelectedShotAngle((prev) => ({ ...prev, [idx]: val }))
+                            }
+                          >
+                            <SelectTrigger className="h-7 text-xs font-sans">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {CAMERA_ANGLE_OPTIONS.map((opt) => (
+                                <SelectItem key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {/* Movement Selector */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <Film className="h-3 w-3 text-emerald-400" /> Camera Movement
+                          </label>
+                          <Select
+                            value={currentMovement}
+                            onValueChange={(val) =>
+                              setSelectedShotMovement((prev) => ({ ...prev, [idx]: val }))
+                            }
+                          >
+                            <SelectTrigger className="h-7 text-xs font-sans">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {CAMERA_MOVEMENT_OPTIONS.map((opt) => (
+                                <SelectItem key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      {/* Director's Visual Rationale */}
+                      {scene.directorNotes && (
+                        <div className="pt-2 text-xs font-serif text-foreground/80 bg-muted/40 p-2.5 rounded border border-border/50">
+                          <span className="font-sans font-semibold text-[10px] uppercase tracking-wider text-sepia block mb-0.5">
+                            Director's Visual Intent & Subtext:
+                          </span>
+                          {scene.directorNotes}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="flex flex-row items-center justify-between border-t pt-4 gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (!cinematographyData) return;
+                const shotListText = cinematographyData.scenes
+                  .map(
+                    (s, i) =>
+                      `Shot ${i + 1}: ${s.heading}\n• Framing: ${selectedShotFraming[i] || s.framing}\n• Angle: ${selectedShotAngle[i] || s.cameraAngle}\n• Movement: ${selectedShotMovement[i] || s.movement || "Static"}\n• Lens: ${s.focalLength || "50mm"}\n• Director Note: ${s.directorNotes || "None"}`,
+                  )
+                  .join("\n\n");
+                navigator.clipboard.writeText(shotListText);
+                toast.success("Cinematography shot list copied to clipboard!");
+              }}
+            >
+              <Copy className="h-4 w-4 mr-1.5" />
+              Copy Shot List
+            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setCinematographyOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                disabled={applyingCinematography || !frames.length}
+                onClick={applyCinematographyToFrames}
+                className="bg-sepia hover:bg-sepia/90 text-white"
+              >
+                <Check className="h-4 w-4 mr-1.5" />
+                {applyingCinematography ? "Applying…" : "Apply to Storyboard Frames"}
               </Button>
             </div>
           </DialogFooter>
@@ -1596,19 +2059,32 @@ function exportDeck(story: Story, bible: BibleEntry[], frames: Frame[]) {
 
     const headH = headLines.length * 14;
 
-    // Weather / Lighting tag
+    // Camera Framing & Lighting tag
+    const framing = f.framing || "Medium Shot";
+    const angle = f.camera_angle || "Eye-Level";
+    const movement = f.movement || "Static";
     doc.setFont("times", "bold");
-    doc.setFontSize(10);
+    doc.setFontSize(9);
     doc.setTextColor(181, 69, 43);
-    doc.text(`LIGHTING: ${(sanitizePdfText(f.lighting) || "DAY").toUpperCase()}`, x, y + 10 + headH + 12);
+    doc.text(`SHOT: ${sanitizePdfText(framing).toUpperCase()}  |  ANGLE: ${sanitizePdfText(angle).toUpperCase()}`, x, y + 10 + headH + 12);
+    doc.text(`MOVE: ${sanitizePdfText(movement).toUpperCase()}  |  LIGHTING: ${(sanitizePdfText(f.lighting) || "DAY").toUpperCase()}`, x, y + 10 + headH + 24);
     doc.setTextColor(31, 26, 20);
 
     doc.setFont("times", "normal");
     doc.setFontSize(11);
     const descLines = doc.splitTextToSize(sanitizePdfText(f.description), 260);
-    doc.text(descLines, x, y + 10 + headH + 30);
+    doc.text(descLines, x, y + 10 + headH + 42);
 
-    let metaY = y + 10 + headH + 30 + descLines.length * 15 + 16;
+    let metaY = y + 10 + headH + 42 + descLines.length * 15 + 14;
+    if (f.director_notes) {
+      doc.setFont("times", "italic");
+      doc.setFontSize(9);
+      doc.setTextColor(110, 95, 80);
+      const noteLines = doc.splitTextToSize(`Visual Intent: ${sanitizePdfText(f.director_notes)}`, 260);
+      doc.text(noteLines, x, metaY);
+      metaY += noteLines.length * 12 + 6;
+      doc.setTextColor(31, 26, 20);
+    }
     if (f.location) {
       doc.setFont("times", "bold");
       doc.text("Location: ", x, metaY);
